@@ -119,6 +119,15 @@ def make_pars(set_prognoses=False, prog_by_age=True, version=None, **kwargs):
     pars['no_hosp_factor'] = 2.0  # Multiplier for how much more likely severely ill people are to become critical if no hospital beds are available
     pars['no_icu_factor']  = 2.0  # Multiplier for how much more likely critically ill people are to die if no ICU beds are available
 
+    # Sequence evolution parameters (disabled by default; see covasim/sequence_evolution.py)
+    pars['seq_pars'] = dict(
+        enable                = False,  # Master toggle; no overhead when False
+        L                     = 1000,   # Genome length in sites
+        wild_type             = None,   # str of length L (ACGT); None → poly-A reference
+        rate_per_site_per_day = 1e-5,   # μ: expected substitutions per site per day
+        model                 = 'JC',   # Substitution model key; currently only 'JC'
+    )
+
     # Handle vaccine and variant parameters
     pars['vaccine_pars'] = {} # Vaccines that are being used; populated during initialization
     pars['vaccine_map']  = {} #Reverse mapping from number to vaccine key

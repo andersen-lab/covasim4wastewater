@@ -16,6 +16,7 @@ from . import plotting as cvplt
 from . import interventions as cvi
 from . import immunity as cvimm
 from . import analysis as cva
+from . import sequence_evolution as cvseq
 from .settings import options as cvo
 
 # Almost everything in this file is contained in the Sim class
@@ -114,6 +115,7 @@ class Sim(cvb.BaseSim):
         self.init_variants() # Initialize the variants
         self.init_immunity() # initialize information about immunity (if use_waning=True)
         self.init_results() # After initializing the variant, create the results structure
+        self.init_sequence_tracker() # Initialize sequence evolution tracker (no-op if disabled)
         self.init_people(reset=reset, init_infections=init_infections, **kwargs) # Create all the people (the heaviest step)
         self.init_interventions()  # Initialize the interventions...
         self.init_analyzers()  # ...and the analyzers...
@@ -413,6 +415,8 @@ class Sim(cvb.BaseSim):
         self.people = cvpop.make_people(self, reset=reset, verbose=verbose, **kwargs)
         self.people.initialize(sim_pars=self.pars) # Fully initialize the people
         self.reset_layer_pars(force=False) # Ensure that layer keys match the loaded population
+        if hasattr(self, 'sequence_tracker'): # Attach tracker before init_infections so seeds are annotated
+            self.people.sequence_tracker = self.sequence_tracker
         if init_infections:
             self.init_infections(verbose=verbose)
 
@@ -499,6 +503,15 @@ class Sim(cvb.BaseSim):
         ''' Initialize immunity matrices and precompute nab waning for each variant '''
         if self['use_waning']:
             cvimm.init_immunity(self, create=create)
+        return
+
+
+    def init_sequence_tracker(self):
+        ''' Initialize the sequence evolution tracker (no-op when seq_pars["enable"] is False) '''
+        if self['seq_pars']['enable']:
+            self.sequence_tracker = cvseq.LineageSequenceTracker(self['seq_pars'], seed=self['rand_seed'])
+        else:
+            self.sequence_tracker = None
         return
 
 
