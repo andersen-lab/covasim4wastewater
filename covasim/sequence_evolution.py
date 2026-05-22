@@ -11,6 +11,7 @@ are reconstructed by walking the transmission tree and applying episode roots
 plus deltas (see reconstruct_haplotype()).
 '''
 
+import os
 import numpy as np
 from abc import ABC, abstractmethod
 
@@ -106,17 +107,26 @@ class LineageSequenceTracker:
     '''
 
     def __init__(self, seq_pars, seed=None):
-        self.L           = seq_pars.get('L', 1000)
-        self.rate        = seq_pars.get('rate_per_site_per_day', 1e-5)
+        self.L    = seq_pars.get('L', 1000)
+        self.rate = seq_pars.get('rate_per_site_per_day', 1e-5)
 
-        wt = seq_pars.get('wild_type')
-        if wt is None:
-            wt = 'A' * self.L
-        if isinstance(wt, str):
-            if len(wt) != self.L:
-                raise ValueError(f"seq_pars['wild_type'] has length {len(wt)} but L={self.L}")
-            wt = encode_sequence(wt)
-        self.wild_type = wt.astype(np.uint8)
+        ref = seq_pars.get('reference')
+        if ref is None:
+            ref = 'A' * self.L
+        elif isinstance(ref, str) and os.path.isfile(ref):
+            # FASTA file path: read sequence and override L
+            seq_lines = []
+            with open(ref) as fh:
+                for line in fh:
+                    if not line.startswith('>'):
+                        seq_lines.append(line.strip())
+            ref = ''.join(seq_lines)
+            self.L = len(ref)
+        if isinstance(ref, str):
+            if len(ref) != self.L:
+                raise ValueError(f"seq_pars['reference'] has length {len(ref)} but L={self.L}")
+            ref = encode_sequence(ref)
+        self.reference = ref.astype(np.uint8)
 
         model_key = seq_pars.get('model', 'JC')
         if model_key not in _MODEL_REGISTRY:
@@ -143,12 +153,12 @@ class LineageSequenceTracker:
         date   = float(entry['date'])
 
         if source is None:
-            # Seed or import: root is wild_type, branch length 0
-            parent_seq = self.wild_type
+            # Seed or import: root is reference, branch length 0
+            parent_seq = self.reference
             delta_t    = 0.0
         else:
             source     = int(source)
-            parent_seq = self._episode_roots.get(source, self.wild_type)
+            parent_seq = self._episode_roots.get(source, self.reference)
             src_exposed = float(people.date_exposed[source])
             if np.isnan(src_exposed):
                 delta_t = 0.0
@@ -166,6 +176,6 @@ class LineageSequenceTracker:
     def reconstruct_haplotype(self, agent_idx):
         '''
         Return the haplotype string at last acquisition for agent_idx.
-        Returns wild_type string if the agent has never been infected.
+        Returns the reference sequence string if the agent has never been infected.
         '''
-        return decode_sequence(self._episode_roots.get(int(agent_idx), self.wild_type))
+        return decode_sequence(self._episode_roots.get(int(agent_idx), self.reference))

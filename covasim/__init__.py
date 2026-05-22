@@ -29,5 +29,6 @@ from .analysis           import * # Depends on utils, misc, interventions
 from .sim                import * # Depends on almost everything
 from .run                import * # Depends on sim
 from .sequence_evolution import * # Optional; enabled via pars['seq_pars']['enable']
+from .wastewater         import * # Optional; requires seq_pars['enable'] = True and bygul
 
 

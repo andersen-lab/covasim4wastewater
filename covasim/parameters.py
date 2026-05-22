@@ -123,7 +123,7 @@ def make_pars(set_prognoses=False, prog_by_age=True, version=None, **kwargs):
     pars['seq_pars'] = dict(
         enable                = False,  # Master toggle; no overhead when False
         L                     = 1000,   # Genome length in sites
-        wild_type             = None,   # str of length L (ACGT); None → poly-A reference
+        reference             = None,   # ACGT str of length L, or path to a FASTA file (overrides L)
         rate_per_site_per_day = 1e-5,   # μ: expected substitutions per site per day
         model                 = 'JC',   # Substitution model key; currently only 'JC'
     )
