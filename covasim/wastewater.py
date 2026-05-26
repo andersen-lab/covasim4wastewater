@@ -161,7 +161,7 @@ class WastewaterSampler(Analyzer):
             day       (int):  simulation day to sample (must be in self.samples)
             primers   (str):  path to primer BED file (required by Bygul)
             reference (str):  path to reference FASTA file (required by Bygul)
-            outdir    (str):  output directory for Bygul reads (default '.')
+            outdir    (str):  output directory for Bygul reads (default '.') (NOTE: If redo=True, Bygul will delete all contents of outdir)
             readcnt   (int):  number of reads per amplicon (default 500)
             redo      (bool): re-run even if output files already exist (default False)
             **bygul_kwargs:   additional CLI options forwarded as --key value pairs
@@ -210,11 +210,13 @@ class WastewaterSampler(Analyzer):
                     '--proportions', proportions_str,
                     '--outdir', outdir,
                     '--readcnt', str(readcnt),
-                    '--redo'
                     ]   
 
             for key, val in bygul_kwargs.items():
                 args.extend([f'--{key}', str(val)])
+
+            if redo:
+                args.extend(['--redo'])
 
             # standalone_mode=False returns the result instead of calling sys.exit
             simulate_proportions.main(args=args, standalone_mode=False)
