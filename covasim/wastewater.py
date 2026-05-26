@@ -148,7 +148,7 @@ class WastewaterSampler(Analyzer):
             lines.append(seq)
         return '\n'.join(lines)
 
-    def simulate(self, day, primers, reference, outdir='./reads/', readcnt=500, redo=False, **bygul_kwargs):
+    def simulate_sample(self, day, primers, reference, outdir='./reads/', readcnt=500, redo=False, **bygul_kwargs):
         '''
         Write per-genotype FASTA files and invoke Bygul's simulate_proportions CLI.
 
