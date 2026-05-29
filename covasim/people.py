@@ -508,9 +508,12 @@ class People(cvb.BasePeople):
         self.flows_variant['new_infections_by_variant'][variant] += n_infections
 
         # Record transmissions
+        _seq_tracker = getattr(self, 'sequence_tracker', None)
         for i, target in enumerate(inds):
             entry = dict(source=source[i] if source is not None else None, target=target, date=self.t, layer=layer, variant=variant_label)
             self.infection_log.append(entry)
+            if _seq_tracker is not None:
+                _seq_tracker.annotate_entry(entry, self)
 
         # Calculate how long before this person can infect other people
         self.dur_exp2inf[inds] = cvu.sample(**durpars['exp2inf'], size=n_infections)

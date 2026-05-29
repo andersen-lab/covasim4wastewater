@@ -25,8 +25,10 @@ from .people        import * # Depends on utils, defaults, base, plotting
 from .population    import * # Depends on people et al.
 from .interventions import * # Depends on defaults, utils, base
 from .immunity      import * # Depends on utils, parameters, defaults
-from .analysis      import * # Depends on utils, misc, interventions
-from .sim           import * # Depends on almost everything
-from .run           import * # Depends on sim
+from .analysis           import * # Depends on utils, misc, interventions
+from .sim                import * # Depends on almost everything
+from .run                import * # Depends on sim
+from .sequence_evolution import * # Optional; enabled via pars['seq_pars']['enable']
+from .wastewater         import * # Optional; requires seq_pars['enable'] = True and bygul
 
 
