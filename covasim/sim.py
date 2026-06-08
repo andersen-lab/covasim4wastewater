@@ -17,6 +17,7 @@ from . import interventions as cvi
 from . import immunity as cvimm
 from . import analysis as cva
 from . import sequence_evolution as cvseq
+from . import fitness as cvfit
 from .settings import options as cvo
 
 # Almost everything in this file is contained in the Sim class
@@ -509,7 +510,25 @@ class Sim(cvb.BaseSim):
     def init_sequence_tracker(self):
         ''' Initialize the sequence evolution tracker (no-op when seq_pars["enable"] is False) '''
         if self['seq_pars']['enable']:
-            self.sequence_tracker = cvseq.LineageSequenceTracker(self['seq_pars'], seed=self['rand_seed'])
+            tracker = cvseq.LineageSequenceTracker(self['seq_pars'], seed=self['rand_seed'])
+
+            # Instantiate the fitness model if enabled
+            fp = self['fitness_pars']
+            if fp['enable']:
+                model_key = fp.get('model', 'bloom_nt')
+                if model_key == 'bloom_nt':
+                    tracker.fitness_model = cvfit.BloomNtFitnessModel(fp['fitness_path'], scale=fp['scale'])
+                else:
+                    raise ValueError(f'Unknown fitness model "{model_key}"; choices: bloom_nt')
+
+            # Extract founding mutations for variants that supply a founding_fasta
+            for v in self['variants']:
+                if getattr(v, 'founding_fasta', None) is not None:
+                    tracker.variant_founding_mutations[v.label] = cvseq.extract_founding_mutations(
+                        v.founding_fasta, tracker.reference
+                    )
+
+            self.sequence_tracker = tracker
         else:
             self.sequence_tracker = None
         return
@@ -630,6 +649,14 @@ class Sim(cvb.BaseSim):
 
         prel_trans = people.rel_trans
         prel_sus   = people.rel_sus
+
+        # Scale per-agent transmissibility by haplotype fitness if fitness model is active
+        _seq_tracker = getattr(self, 'sequence_tracker', None)
+        if _seq_tracker is not None and _seq_tracker.fitness_model is not None:
+            _fitness = np.ones(len(people), dtype=prel_trans.dtype)
+            for _i in np.where(people.infectious)[0]:
+                _fitness[_i] = _seq_tracker.get_fitness_multiplier(_i)
+            prel_trans = prel_trans * _fitness  # new array; does not modify people.rel_trans
 
         # Iterate through n_variants to calculate infections
         for variant in range(nv):

@@ -128,6 +128,14 @@ def make_pars(set_prognoses=False, prog_by_age=True, version=None, **kwargs):
         model                 = 'JC',   # Substitution model key; currently only 'JC'
     )
 
+    # Variant fitness parameters (disabled by default; see covasim/fitness.py)
+    pars['fitness_pars'] = dict(
+        enable       = False,           # Requires seq_pars['enable'] = True
+        model        = 'bloom_nt',      # Fitness model class; 'bloom_nt' → BloomNtFitnessModel
+        fitness_path = 'data/nt_fitness.csv',
+        scale        = 0.1,             # Scales log-fitness sum before exp(); tune to calibrate sweep speed
+    )
+
     # Handle vaccine and variant parameters
     pars['vaccine_pars'] = {} # Vaccines that are being used; populated during initialization
     pars['vaccine_map']  = {} #Reverse mapping from number to vaccine key

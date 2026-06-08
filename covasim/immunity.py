@@ -35,10 +35,11 @@ class variant(sc.prettyobj):
         sim2    = cv.Sim(variants=cv.variant('alpha', days=0, n_imports=20), pop_infected=0).run() # Replace default variant with alpha
     '''
 
-    def __init__(self, variant, days, label=None, n_imports=1, rescale=True):
+    def __init__(self, variant, days, label=None, n_imports=1, rescale=True, founding_fasta=None):
         self.days = days # Handle inputs
         self.n_imports = int(n_imports)
         self.rescale   = rescale
+        self.founding_fasta = founding_fasta # Optional path to founding genotype FASTA; mutations extracted during sim.init_sequence_tracker()
         self.index     = None # Index of the variant in the sim; set later
         self.label     = None # Variant label (used as a dict key)
         self.p         = None # This is where the parameters will be stored
