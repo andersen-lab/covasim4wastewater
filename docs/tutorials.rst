@@ -14,4 +14,5 @@
     tutorials/tut_deployment.ipynb
     tutorials/tut_tips.ipynb
     tutorials/tut_advanced.ipynb
+    tutorials/tut_wastewater.ipynb
     
