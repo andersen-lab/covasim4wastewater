@@ -33,28 +33,99 @@ def decode_sequence(seq_arr):
     return ''.join(_INT_TO_NT[int(b)] for b in seq_arr)
 
 
+def _align_to_reference(seq_str, ref_str):
+    '''
+    Global pairwise alignment of seq_str to ref_str using biopython.
+
+    Returns (aligned_ref, aligned_query) strings with '-' for gaps.
+    Only called when lengths differ.
+    '''
+    try:
+        from Bio.Align import PairwiseAligner
+    except ImportError:
+        raise ImportError(
+            'biopython is required to align sequences of different lengths. '
+            'Install with: pip install biopython'
+        )
+    aligner = PairwiseAligner()
+    aligner.mode = 'global'
+    aligner.open_gap_score   = -10
+    aligner.extend_gap_score = -0.5
+    aligner.match_score      = 2
+    aligner.mismatch_score   = -1
+    alignment = next(aligner.align(ref_str, seq_str))
+    ref_coords, query_coords = alignment.aligned
+    aligned_ref, aligned_query = [], []
+    r_prev, q_prev = 0, 0
+    for (r_start, r_end), (q_start, q_end) in zip(ref_coords, query_coords):
+        if r_start > r_prev:       # deletion in query
+            aligned_ref.append(ref_str[r_prev:r_start])
+            aligned_query.append('-' * (r_start - r_prev))
+        if q_start > q_prev:       # insertion in query
+            aligned_query.append(seq_str[q_prev:q_start])
+            aligned_ref.append('-' * (q_start - q_prev))
+        aligned_ref.append(ref_str[r_start:r_end])
+        aligned_query.append(seq_str[q_start:q_end])
+        r_prev, q_prev = r_end, q_end
+    if r_prev < len(ref_str):
+        aligned_ref.append(ref_str[r_prev:])
+        aligned_query.append('-' * (len(ref_str) - r_prev))
+    if q_prev < len(seq_str):
+        aligned_query.append(seq_str[q_prev:])
+        aligned_ref.append('-' * (len(seq_str) - q_prev))
+    return ''.join(aligned_ref), ''.join(aligned_query)
+
+
 def extract_founding_mutations(fasta_path, reference):
     '''
     Diff a single-record FASTA against the reference and return a frozenset of SNPs.
 
+    When the FASTA length matches the reference, a fast character-by-character diff
+    is used. When lengths differ (common for consensus genomes with indels), the
+    sequence is globally aligned to the reference with biopython; indel columns are
+    skipped since the downstream fitness model only handles SNPs.
+
     Args:
-        fasta_path (str): path to FASTA file (single record, same length as reference)
+        fasta_path (str): path to FASTA file (single record)
         reference  (ndarray): uint8 reference sequence from LineageSequenceTracker
 
     Returns:
         frozenset of (site_0indexed, ref_nt_int, alt_nt_int)
     '''
+    import warnings
     seq_lines = []
     with open(fasta_path) as fh:
         for line in fh:
             if not line.startswith('>'):
                 seq_lines.append(line.strip())
     seq_str = ''.join(seq_lines)
+
     if len(seq_str) != len(reference):
-        raise ValueError(
-            f'founding_fasta "{fasta_path}" has length {len(seq_str)} '
-            f'but reference has length {len(reference)}'
+        warnings.warn(
+            f'founding_fasta "{fasta_path}" length ({len(seq_str)}) differs from '
+            f'reference ({len(reference)}); aligning with biopython (indels ignored).'
         )
+        ref_str = ''.join(_INT_TO_NT[int(b)] for b in reference)
+        aligned_ref, aligned_query = _align_to_reference(seq_str, ref_str)
+        mutations = set()
+        ref_site = 0
+        for r_char, q_char in zip(aligned_ref, aligned_query):
+            if r_char == '-':           # insertion in query → no reference coordinate
+                continue
+            if q_char == '-':           # deletion in query → not an SNP
+                ref_site += 1
+                continue
+            if q_char not in _NT_TO_INT:    # ambiguous base → treat as reference
+                ref_site += 1
+                continue
+            ref_nt = _NT_TO_INT[r_char]
+            alt_nt = _NT_TO_INT[q_char]
+            if alt_nt != ref_nt:
+                mutations.add((ref_site, ref_nt, alt_nt))
+            ref_site += 1
+        return frozenset(mutations)
+
+    # Fast path: lengths match — character-by-character diff
     # Replace N/n (ambiguous bases) with the reference nucleotide so they don't
     # register as mutations — consensus FASTAs commonly contain Ns at low-coverage sites.
     seq_str = ''.join(
