@@ -24,15 +24,25 @@ __all__ = ['WastewaterSampler', 'WastewaterSample']
 
 @dataclasses.dataclass
 class WastewaterSample:
-    '''Snapshot of circulating genotypes and their viral-load-weighted proportions.'''
-    day:          int
-    date:         str
-    sequences:    list   # deduplicated ACGT strings, one per distinct genotype
-    proportions:  list   # normalized viral-load fractions, sums to 1.0
-    raw_loads:    list   # un-normalized total viral load per genotype
-    n_infectious: int    # number of currently infectious agents
-    n_genotypes:  int    # number of distinct sequences present
-    # add region eventually
+    '''Snapshot of circulating genotypes/variants and their viral-load-weighted proportions.
+
+    In haplotype mode (group_by='haplotype'):
+        sequences holds deduplicated ACGT strings, one per distinct evolved sequence.
+        variant_labels is None.
+
+    In variant mode (group_by='variant'):
+        variant_labels holds variant name strings (e.g. 'wild', 'delta').
+        sequences is None.
+    '''
+    day:            int
+    date:           str
+    sequences:      list            # ACGT strings (haplotype mode) or None (variant mode)
+    proportions:    list            # normalized viral-load fractions, sums to 1.0
+    raw_loads:      list            # un-normalized total viral load per genotype/variant
+    n_infectious:   int             # number of currently infectious agents
+    n_genotypes:    int             # number of distinct sequences/variants present
+    group_by:       str  = 'haplotype'  # 'haplotype' or 'variant'
+    variant_labels: list = None     # variant name strings (variant mode) or None (haplotype mode)
 
 
 class WastewaterSampler(Analyzer):
@@ -49,34 +59,48 @@ class WastewaterSampler(Analyzer):
       5. Normalizes to proportions.
 
     Snapshots are stored in self.samples (dict: int day → WastewaterSample).
-    Use to_fasta(day) to get a multi-FASTA string, or simulate(day, ...) to
-    pass the mixture directly to Bygul.
+    Use to_fasta(day) to get a multi-FASTA string (haplotype mode only), or
+    simulate_sample(day, ...) to pass the mixture directly to Bygul.
 
     Args:
-        days   (list): simulation days (int) or calendar date strings to sample.
-        label  (str):  optional label for the analyzer.
+        days     (list): simulation days (int) or calendar date strings to sample.
+        label    (str):  optional label for the analyzer.
+        group_by (str):  how to aggregate viral loads — either ``'haplotype'``
+                         (default; groups by full evolved ACGT sequence, requires
+                         seq_pars enabled) or ``'variant'`` (groups by named variant
+                         such as 'wild', 'delta', as defined in sim['variant_map']).
 
-    Example::
+    Example — haplotype mode (default)::
 
-        ww = cv.WastewaterSampler(days=['2020-06-01', 200])
+        ww = cv.WastewaterSampler(days=[56, 120])
         sim = cv.Sim(pars, analyzers=[ww])
         sim.run()
+        print(ww.to_fasta(56))
 
-        sample = ww.samples[150]
-        print(ww.to_fasta(150))
-        ww.simulate(150, outdir='./reads/', n_reads=10_000)
+    Example — variant mode::
+
+        ww = cv.WastewaterSampler(days=[56, 120], group_by='variant')
+        sim = cv.Sim(pars, analyzers=[ww])
+        sim.run()
+        sample = ww.samples[56]
+        for name, prop in zip(sample.variant_labels, sample.proportions):
+            print(f'{name}: {prop:.1%}')
     '''
 
-    def __init__(self, days, label=None):
+    def __init__(self, days, label=None, group_by='haplotype'):
         super().__init__(label=label)
+        if group_by not in ('haplotype', 'variant'):
+            raise ValueError(f"group_by must be 'haplotype' or 'variant', got '{group_by}'")
         self._days_input = days  # raw user input; converted in initialize()
+        self.group_by    = group_by
         self.samples     = {}
 
     def initialize(self, sim):
         super().initialize(sim)
-        if not sim['seq_pars'].get('enable', False):
+        if self.group_by == 'haplotype' and not sim['seq_pars'].get('enable', False):
             raise ValueError(
-                "WastewaterSampler requires pars['seq_pars']['enable'] = True"
+                "WastewaterSampler with group_by='haplotype' requires "
+                "pars['seq_pars']['enable'] = True"
             )
         # Convert string dates to integer days
         self._day_set = set()
@@ -89,8 +113,7 @@ class WastewaterSampler(Analyzer):
         self._take_sample(sim)
 
     def _take_sample(self, sim):
-        people  = sim.people
-        tracker = people.sequence_tracker
+        people = sim.people
 
         # Infectious agents only
         inds = np.nonzero(people.infectious)[0]
@@ -100,7 +123,7 @@ class WastewaterSampler(Analyzer):
             return
 
         # Viral load per agent (same parameterization as sim.py lines 615-621)
-        frac_time = cvd.default_float(sim['viral_dist']['frac_time'])
+        frac_time  = cvd.default_float(sim['viral_dist']['frac_time'])
         load_ratio = cvd.default_float(sim['viral_dist']['load_ratio'])
         high_cap   = cvd.default_float(sim['viral_dist']['high_cap'])
 
@@ -113,10 +136,44 @@ class WastewaterSampler(Analyzer):
         )
         loads = viral_load[inds]
 
-        # Haplotype per infectious agent
+        if self.group_by == 'variant':
+            self.samples[sim.t] = self._sample_by_variant(sim, inds, loads)
+        else:
+            self.samples[sim.t] = self._sample_by_haplotype(sim, inds, loads)
+
+    def _sample_by_variant(self, sim, inds, loads):
+        '''Aggregate viral load by named variant (e.g. wild-type, introduced variants).'''
+        variant_map     = sim['variant_map']          # int index → label str
+        variant_indices = sim.people.infectious_variant[inds]
+
+        load_by_variant = defaultdict(float)
+        for vi, load in zip(variant_indices, loads):
+            vname = variant_map.get(int(vi), f'variant_{int(vi)}')
+            load_by_variant[vname] += float(load)
+
+        total          = sum(load_by_variant.values())
+        variant_labels = list(load_by_variant.keys())
+        raw_loads      = [load_by_variant[v] for v in variant_labels]
+        proportions    = [v / total for v in raw_loads]
+        proportions[-1] = 1.0 - sum(proportions[:-1])
+
+        return WastewaterSample(
+            day            = sim.t,
+            date           = sim.date(sim.t),
+            sequences      = None,
+            proportions    = proportions,
+            raw_loads      = raw_loads,
+            n_infectious   = int(len(inds)),
+            n_genotypes    = len(variant_labels),
+            group_by       = 'variant',
+            variant_labels = variant_labels,
+        )
+
+    def _sample_by_haplotype(self, sim, inds, loads):
+        '''Aggregate viral load by full evolved haplotype (ACGT sequence).'''
+        tracker    = sim.people.sequence_tracker
         haplotypes = [tracker.reconstruct_haplotype(int(i)) for i in inds]
 
-        # Aggregate viral load by identical sequence
         load_by_seq = defaultdict(float)
         for hap, load in zip(haplotypes, loads):
             load_by_seq[hap] += float(load)
@@ -127,7 +184,7 @@ class WastewaterSampler(Analyzer):
         proportions = [v / total for v in raw_loads]
         proportions[-1] = 1.0 - sum(proportions[:-1])
 
-        self.samples[sim.t] = WastewaterSample(
+        return WastewaterSample(
             day          = sim.t,
             date         = sim.date(sim.t),
             sequences    = sequences,
@@ -135,13 +192,22 @@ class WastewaterSampler(Analyzer):
             raw_loads    = raw_loads,
             n_infectious = int(len(inds)),
             n_genotypes  = len(sequences),
+            group_by     = 'haplotype',
         )
 
     def to_fasta(self, day):
-        '''Return a multi-FASTA string for the genotype mixture on the given day.'''
+        '''Return a multi-FASTA string for the genotype mixture on the given day.
+
+        Only available when group_by='haplotype'. Raises ValueError otherwise.
+        '''
         sample = self.samples[day]
         if sample is None:
             return ''
+        if sample.group_by == 'variant':
+            raise ValueError(
+                "to_fasta() requires group_by='haplotype'. "
+                "In variant mode use sample.variant_labels and sample.proportions directly."
+            )
         lines = []
         for i, (seq, prop) in enumerate(zip(sample.sequences, sample.proportions)):
             lines.append(f'>genotype_{i}  proportion={prop:.8f}  day={day}  date={sample.date}')
@@ -151,6 +217,8 @@ class WastewaterSampler(Analyzer):
     def simulate_sample(self, day, primers, reference, outdir='./reads/', readcnt=500, redo=False, **bygul_kwargs):
         '''
         Write per-genotype FASTA files and invoke Bygul's simulate_proportions CLI.
+
+        Only available when group_by='haplotype'. Raises ValueError otherwise.
 
         Bygul's simulate_proportions command is a Click CLI that expects genome
         sequences as on-disk FASTA files. This method writes temporary FASTA files,
@@ -184,6 +252,11 @@ class WastewaterSampler(Analyzer):
         sample = self.samples[day]
         if sample is None:
             raise ValueError(f"No infectious agents were present on day {day}; cannot simulate.")
+        if sample.group_by == 'variant':
+            raise ValueError(
+                "simulate_sample() requires group_by='haplotype'. "
+                "In variant mode use sample.variant_labels and sample.proportions directly."
+            )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Write each unique genotype to its own FASTA file
