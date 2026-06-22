@@ -618,13 +618,7 @@ class Sim(cvb.BaseSim):
         date_inf = people.date_infectious
         date_rec = people.date_recovered
         date_dead = people.date_dead
-        date_exposed = people.date_exposed
-        par1 = cvd.default_float(self['beta_dist']['par1'])
-        par2 = cvd.default_float(self['beta_dist']['par2'])
-        mean  = np.log(par1**2 / np.sqrt(par2 + par1**2)) # Computes the mean of the underlying normal distribution
-        sigma = np.sqrt(np.log(par2/par1**2 + 1)) # Computes sigma for the underlying normal distribution
-        rel_trans = np.random.lognormal(mean=mean, sigma=sigma, size=len(date_exposed)) # Draw relative transmission values from a lognormal distribution
-        viral_load = cvu.compute_viral_load(t, date_inf, date_rec, date_dead, frac_time, load_ratio, high_cap * rel_trans[t])
+        viral_load = cvu.compute_viral_load(t, date_inf, date_rec, date_dead, frac_time, load_ratio, high_cap * people.rel_trans[t])
         self.people.viral_load[:, t] = viral_load
         # Shorten useful parameters
         nv = self['n_variants'] # Shorten number of variants
