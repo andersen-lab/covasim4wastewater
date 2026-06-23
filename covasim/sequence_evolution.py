@@ -303,10 +303,19 @@ class LineageSequenceTracker:
         _track = self.fitness_model is not None or bool(self.variant_founding_mutations)
 
         if source is None:
-            # Seed or import: root is reference, branch length 0
-            parent_seq  = self.reference
+            # Seed or import: branch length 0. The episode root is the variant's
+            # founding haplotype (reference + its defining SNPs), not the bare
+            # reference — otherwise reconstruct_haplotype() would strip variant
+            # identity and every variant would collapse to the reference sequence.
             delta_t     = 0.0
-            parent_muts = self.variant_founding_mutations.get(variant_label, frozenset()) if _track else None
+            founding    = self.variant_founding_mutations.get(variant_label, frozenset())
+            if founding:
+                parent_seq = self.reference.copy()
+                for site, _ref_nt, alt_nt in founding:
+                    parent_seq[site] = alt_nt
+            else:
+                parent_seq = self.reference
+            parent_muts = founding if _track else None
         else:
             source     = int(source)
             parent_seq = self._episode_roots.get(source, self.reference)
