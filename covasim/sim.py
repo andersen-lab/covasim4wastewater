@@ -618,7 +618,7 @@ class Sim(cvb.BaseSim):
         date_inf = people.date_infectious
         date_rec = people.date_recovered
         date_dead = people.date_dead
-        viral_load = cvu.compute_viral_load(t, date_inf, date_rec, date_dead, frac_time, load_ratio, high_cap) * people.rel_trans[t]
+        viral_load = cvu.compute_viral_load(t, date_inf, date_rec, date_dead, frac_time, load_ratio, high_cap) * people.rel_trans
         self.people.viral_load[:, t] = viral_load
         # Shorten useful parameters
         nv = self['n_variants'] # Shorten number of variants
@@ -654,7 +654,6 @@ class Sim(cvb.BaseSim):
                 quar_factor = cvd.default_float(self['quar_factor'][lkey])
                 beta_layer  = cvd.default_float(self['beta_layer'][lkey])
                 rel_trans, rel_sus = cvu.compute_trans_sus(prel_trans, prel_sus, inf_variant, sus, beta_layer, viral_load, symp, iso, quar, asymp_factor, iso_factor, quar_factor, sus_imm)
-
                 # Calculate actual transmission
                 pairs = [[p1,p2]] if not self._legacy_trans else [[p1,p2], [p2,p1]] # Support slower legacy method of calculation, but by default skip this loop
                 for p1,p2 in pairs:
