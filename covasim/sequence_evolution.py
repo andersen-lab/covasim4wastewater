@@ -247,7 +247,7 @@ class LineageSequenceTracker:
 
     def __init__(self, seq_pars, seed=None):
         self.L    = seq_pars.get('L', 1000)
-        self.rate = seq_pars.get('rate_per_site_per_day', 1e-5)
+        self.rate = seq_pars.get('mol_clock_rate', 1e-5)
 
         ref = seq_pars.get('reference')
         if ref is None:

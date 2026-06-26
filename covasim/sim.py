@@ -517,7 +517,7 @@ class Sim(cvb.BaseSim):
             if fp['enable']:
                 model_key = fp.get('model', 'bloom_nt')
                 if model_key == 'bloom_nt':
-                    tracker.fitness_model = cvfit.BloomNtFitnessModel(fp['fitness_path'], scale=fp['scale'])
+                    tracker.fitness_model = cvfit.BloomNtFitnessModel(fp['fitness_data_path'], scale=fp['scale'])
                 else:
                     raise ValueError(f'Unknown fitness model "{model_key}"; choices: bloom_nt')
 

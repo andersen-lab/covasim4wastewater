@@ -16,13 +16,13 @@ __all__ = ['VariantFitnessModel', 'BloomNtFitnessModel']
 class VariantFitnessModel(ABC):
     '''Abstract base: load fitness data and compute rel_beta multiplier from mutations.'''
 
-    def __init__(self, fitness_path, scale=0.1):
+    def __init__(self, fitness_data_path, scale=0.1):
         self.scale  = scale
         self._cache = {}
-        self.load(fitness_path)
+        self.load(fitness_data_path)
 
     @abstractmethod
-    def load(self, fitness_path: str) -> None:
+    def load(self, fitness_data_path: str) -> None:
         '''Load fitness data from file into whatever structure compute_fitness needs.'''
 
     @abstractmethod
@@ -49,9 +49,9 @@ class BloomNtFitnessModel(VariantFitnessModel):
     '''
     NT_MAP = {'A': 0, 'C': 1, 'G': 2, 'T': 3}
 
-    def load(self, fitness_path: str) -> None:
+    def load(self, fitness_data_path: str) -> None:
         self.lookup = {}  # (nt_site_1indexed, nt_int) → log-fitness float
-        with open(fitness_path) as f:
+        with open(fitness_data_path) as f:
             for row in csv.DictReader(f):
                 site = int(row['nt_site'])
                 nt   = self.NT_MAP[row['nt']]
