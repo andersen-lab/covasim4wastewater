@@ -42,8 +42,7 @@ class WastewaterSampler(Analyzer):
 
     For each sampled day:
       1. Identifies all currently infectious agents.
-      2. Computes each agent's viral load using the same model as the sim's
-         transmission loop (cvu.compute_viral_load).
+      2. Get people's viral shedding for those agents.
       3. Retrieves each agent's evolved haplotype from LineageSequenceTracker.
       4. Groups identical haplotypes and sums their viral load contributions.
       5. Normalizes to proportions.
@@ -99,19 +98,8 @@ class WastewaterSampler(Analyzer):
             self.samples[sim.t] = None
             return
 
-        # Viral load per agent (same parameterization as sim.py lines 615-621)
-        frac_time = cvd.default_float(sim['viral_dist']['frac_time'])
-        load_ratio = cvd.default_float(sim['viral_dist']['load_ratio'])
-        high_cap   = cvd.default_float(sim['viral_dist']['high_cap'])
-
-        viral_load = cvu.compute_viral_load(
-            sim.t,
-            people.date_infectious,
-            people.date_recovered,
-            people.date_dead,
-            frac_time, load_ratio, high_cap,
-        )
-        loads = viral_load[inds]
+        viral_shedding = sim.people.viral_shedding
+        loads = viral_shedding[inds]
 
         # Haplotype per infectious agent
         haplotypes = [tracker.reconstruct_haplotype(int(i)) for i in inds]
