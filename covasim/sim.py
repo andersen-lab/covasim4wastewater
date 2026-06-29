@@ -592,8 +592,6 @@ class Sim(cvb.BaseSim):
         contacts = people.update_contacts() # Compute new contacts
         hosp_max = people.count('severe')   > self['n_beds_hosp'] if self['n_beds_hosp'] is not None else False # Check for acute bed constraint
         icu_max  = people.count('critical') > self['n_beds_icu']  if self['n_beds_icu']  is not None else False # Check for ICU bed constraint
-        self.results['viral_load_hist'][:, self.t] = self.people.viral_load
-        self.results['viral_shedding_hist'][:, self.t] = self.people.viral_shedding
         # Randomly infect some people (imported infections)
         if self['n_imports']:
             n_imports = cvu.poisson(self['n_imports']/self.rescale_vec[self.t]) # Imported cases
@@ -624,6 +622,8 @@ class Sim(cvb.BaseSim):
         viral_shedding = viral_load * people.rel_trans
         self.people.viral_load= viral_load
         self.people.viral_shedding = viral_shedding
+        self.results['viral_load_hist'][:, self.t] = self.people.viral_load
+        self.results['viral_shedding_hist'][:, self.t] = self.people.viral_shedding
         # Shorten useful parameters
         nv = self['n_variants'] # Shorten number of variants
         sus = people.susceptible
