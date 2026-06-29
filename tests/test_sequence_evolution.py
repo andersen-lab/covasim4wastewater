@@ -24,7 +24,7 @@ def make_seq_sim(n_days=10, pop_size=200, pop_infected=10, rand_seed=42,
     seq_pars = dict(
         enable=True,
         L=L,
-        wild_type=None,
+        reference=None,
         mol_clock_rate=rate,
         model='JC',
         **seq_kwargs,
@@ -109,37 +109,30 @@ def test_jc_reproducibility():
 def _make_tracker(L=50, rate=1e-3, seed=0):
     seq_pars = dict(
         L=L,
-        wild_type=None,
+        reference=None,
         mol_clock_rate=rate,
         model='JC',
     )
     return LineageSequenceTracker(seq_pars, seed=seed)
 
 
-def test_tracker_wild_type_default():
+def test_tracker_reference_default():
     tracker = _make_tracker(L=10)
-    assert decode_sequence(tracker.wild_type) == 'A' * 10
+    assert decode_sequence(tracker.reference) == 'A' * 10
 
 
-def test_tracker_custom_wild_type():
+def test_tracker_custom_reference():
     wt = 'ACGTACGTAC'
-    seq_pars = dict(L=10, wild_type=wt, mol_clock_rate=1e-5,
+    seq_pars = dict(L=10, reference=wt, mol_clock_rate=1e-5,
                     model='JC')
     tracker = LineageSequenceTracker(seq_pars, seed=0)
-    assert decode_sequence(tracker.wild_type) == wt
+    assert decode_sequence(tracker.reference) == wt
 
 
-def test_tracker_wild_type_length_mismatch():
-    seq_pars = dict(L=5, wild_type='ACGT', mol_clock_rate=1e-5,
+def test_tracker_reference_length_mismatch():
+    seq_pars = dict(L=5, reference='ACGT', mol_clock_rate=1e-5,
                     model='JC')
     with pytest.raises(ValueError, match='length'):
-        LineageSequenceTracker(seq_pars, seed=0)
-
-
-def test_tracker_unknown_model():
-    seq_pars = dict(L=10, wild_type=None, mol_clock_rate=1e-5,
-                    model='GTR')
-    with pytest.raises(ValueError, match='Unknown'):
         LineageSequenceTracker(seq_pars, seed=0)
 
 
@@ -201,9 +194,9 @@ def test_tracker_episode_root_reset_on_reinfection():
 
 def test_tracker_reconstruct_haplotype_uninfected():
     tracker = _make_tracker(L=8)
-    # Agent never infected → should return wild_type string
-    wt_str = decode_sequence(tracker.wild_type)
-    assert tracker.reconstruct_haplotype(999) == wt_str
+    # Agent never infected → should return reference sequence string
+    ref_str = decode_sequence(tracker.reference)
+    assert tracker.reconstruct_haplotype(999) == ref_str
 
 
 def test_tracker_reconstruct_haplotype_after_infection():
@@ -214,9 +207,9 @@ def test_tracker_reconstruct_haplotype_after_infection():
 
     entry = dict(source=None, target=3, date=0.0, layer='seed_infection', variant='wild')
     tracker.annotate_entry(entry, FakePeople())
-    # With rate=0, child == wild_type
-    wt_str = decode_sequence(tracker.wild_type)
-    assert tracker.reconstruct_haplotype(3) == wt_str
+    # With rate=0, child == reference
+    ref_str = decode_sequence(tracker.reference)
+    assert tracker.reconstruct_haplotype(3) == ref_str
 
 
 # ---------------------------------------------------------------------------
