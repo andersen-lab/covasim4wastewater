@@ -15,8 +15,6 @@ from collections import defaultdict
 
 import numpy as np
 
-import covasim.utils    as cvu
-import covasim.defaults as cvd
 from .analysis import Analyzer
 
 __all__ = ['WastewaterSampler', 'WastewaterSample']
@@ -52,8 +50,8 @@ class WastewaterSampler(Analyzer):
 
     For each sampled day:
       1. Identifies all currently infectious agents.
-      2. Computes each agent's viral load using the same model as the sim's
-         transmission loop (cvu.compute_viral_load).
+      2. Reads each agent's viral load from ``sim.people.viral_load``, which
+         is already computed by ``sim.step()`` before analyzers are called.
       3. Retrieves each agent's evolved haplotype from LineageSequenceTracker.
       4. Groups identical haplotypes and sums their viral load contributions.
       5. Normalizes to proportions.
@@ -122,19 +120,7 @@ class WastewaterSampler(Analyzer):
             self.samples[sim.t] = None
             return
 
-        # Viral load per agent (same parameterization as sim.py lines 615-621)
-        frac_time  = cvd.default_float(sim['viral_dist']['frac_time'])
-        load_ratio = cvd.default_float(sim['viral_dist']['load_ratio'])
-        high_cap   = cvd.default_float(sim['viral_dist']['high_cap'])
-
-        viral_load = cvu.compute_viral_load(
-            sim.t,
-            people.date_infectious,
-            people.date_recovered,
-            people.date_dead,
-            frac_time, load_ratio, high_cap,
-        )
-        loads = viral_load[inds]
+        loads = sim.people.viral_load[inds, sim.t]
 
         if self.group_by == 'variant':
             self.samples[sim.t] = self._sample_by_variant(sim, inds, loads)
