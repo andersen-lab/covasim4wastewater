@@ -7,7 +7,7 @@ by individual viral load — i.e. what a wastewater sample would look like.
 Snapshots can be exported as FASTA or fed directly to Bygul's
 simulate_proportions to generate synthetic sequencing reads.
 
-Requires pars['seq_pars']['enable'] = True.
+Requires pars['evo_pars']['enable'] = True.
 '''
 
 import dataclasses
@@ -66,7 +66,7 @@ class WastewaterSampler(Analyzer):
         label    (str):  optional label for the analyzer.
         group_by (str):  how to aggregate viral loads — either ``'haplotype'``
                          (default; groups by full evolved ACGT sequence, requires
-                         seq_pars enabled) or ``'variant'`` (groups by named variant
+                         evo_pars enabled) or ``'variant'`` (groups by named variant
                          such as 'wild', 'delta', as defined in sim['variant_map']).
 
     Example — haplotype mode (default)::
@@ -96,10 +96,10 @@ class WastewaterSampler(Analyzer):
 
     def initialize(self, sim):
         super().initialize(sim)
-        if self.group_by == 'haplotype' and not sim['seq_pars'].get('enable', False):
+        if self.group_by == 'haplotype' and not sim['evo_pars'].get('enable', False):
             raise ValueError(
                 "WastewaterSampler with group_by='haplotype' requires "
-                "pars['seq_pars']['enable'] = True"
+                "pars['evo_pars']['enable'] = True"
             )
         # Convert string dates to integer days
         self._day_set = set()

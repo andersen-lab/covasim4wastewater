@@ -1,7 +1,7 @@
 '''
 Sequence evolution module for Covasim.
 
-When enabled via pars['seq_pars']['enable'] = True, annotates each
+When enabled via pars['evo_pars']['enable'] = True, annotates each
 infection_log entry with nucleotide mutation deltas accumulated along the
 transmission edge using a Jukes-Cantor (or pluggable) substitution model.
 
@@ -234,22 +234,22 @@ class LineageSequenceTracker:
     Maintains a per-agent episode haplotype (reset on each new infection) and
     annotates infection_log entries with branch-specific mutation deltas.
 
-    Attach to a sim via pars['seq_pars']['enable'] = True; Sim.initialize()
+    Attach to a sim via pars['evo_pars']['enable'] = True; Sim.initialize()
     creates the tracker and attaches it to sim.people.sequence_tracker so that
     People.infect() can call annotate_entry() after each log append.
 
-    Fitness support (optional):
-        Set fitness_model to a VariantFitnessModel instance (done by
-        sim.init_sequence_tracker() when fitness_pars['enable'] is True).
+    Fitness support:
+        A VariantFitnessModel is always instantiated when evo_pars is enabled
+        (done by sim.init_sequence_tracker()).
         Set variant_founding_mutations[label] = frozenset(...) for any variant
         whose founding genotype differs from the reference.
     '''
 
-    def __init__(self, seq_pars, seed=None):
-        self.L    = seq_pars.get('L', 1000)
-        self.rate = seq_pars.get('mol_clock_rate', 1e-5)
+    def __init__(self, evo_pars, seed=None):
+        self.L    = evo_pars.get('L', 1000)
+        self.rate = evo_pars.get('mol_clock_rate', 1e-5)
 
-        ref = seq_pars.get('reference')
+        ref = evo_pars.get('reference')
         if ref is None:
             ref = 'A' * self.L
         elif isinstance(ref, str) and os.path.isfile(ref):
@@ -263,11 +263,11 @@ class LineageSequenceTracker:
             self.L = len(ref)
         if isinstance(ref, str):
             if len(ref) != self.L:
-                raise ValueError(f"seq_pars['reference'] has length {len(ref)} but L={self.L}")
+                raise ValueError(f"evo_pars['reference'] has length {len(ref)} but L={self.L}")
             ref = encode_sequence(ref)
         self.reference = ref.astype(np.uint8)
 
-        model_key = seq_pars.get('model', 'JC')
+        model_key = evo_pars.get('sub_model', 'JC')
         if model_key not in _MODEL_REGISTRY:
             raise ValueError(f"Unknown substitution model '{model_key}'; choices: {list(_MODEL_REGISTRY)}")
         self.model = _MODEL_REGISTRY[model_key]()

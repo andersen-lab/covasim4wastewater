@@ -19,15 +19,15 @@ from covasim.sequence_evolution import (
 # ---------------------------------------------------------------------------
 
 def make_seq_sim(n_days=10, pop_size=200, pop_infected=10, rand_seed=42,
-                 L=100, rate=1e-3, **seq_kwargs):
+                 L=100, rate=1e-3, **evo_kwargs):
     '''Small sim with sequence tracking enabled.'''
-    seq_pars = dict(
+    evo_pars = dict(
         enable=True,
         L=L,
         reference=None,
         mol_clock_rate=rate,
-        model='JC',
-        **seq_kwargs,
+        sub_model='JC',
+        **evo_kwargs,
     )
     sim = cv.Sim(
         pop_size=pop_size,
@@ -35,7 +35,7 @@ def make_seq_sim(n_days=10, pop_size=200, pop_infected=10, rand_seed=42,
         n_days=n_days,
         rand_seed=rand_seed,
         verbose=0,
-        seq_pars=seq_pars,
+        evo_pars=evo_pars,
     )
     sim.run()
     return sim
@@ -107,13 +107,13 @@ def test_jc_reproducibility():
 # ---------------------------------------------------------------------------
 
 def _make_tracker(L=50, rate=1e-3, seed=0):
-    seq_pars = dict(
+    evo_pars = dict(
         L=L,
         reference=None,
         mol_clock_rate=rate,
-        model='JC',
+        sub_model='JC',
     )
-    return LineageSequenceTracker(seq_pars, seed=seed)
+    return LineageSequenceTracker(evo_pars, seed=seed)
 
 
 def test_tracker_reference_default():
@@ -123,17 +123,17 @@ def test_tracker_reference_default():
 
 def test_tracker_custom_reference():
     wt = 'ACGTACGTAC'
-    seq_pars = dict(L=10, reference=wt, mol_clock_rate=1e-5,
-                    model='JC')
-    tracker = LineageSequenceTracker(seq_pars, seed=0)
+    evo_pars = dict(L=10, reference=wt, mol_clock_rate=1e-5,
+                    sub_model='JC')
+    tracker = LineageSequenceTracker(evo_pars, seed=0)
     assert decode_sequence(tracker.reference) == wt
 
 
 def test_tracker_reference_length_mismatch():
-    seq_pars = dict(L=5, reference='ACGT', mol_clock_rate=1e-5,
-                    model='JC')
+    evo_pars = dict(L=5, reference='ACGT', mol_clock_rate=1e-5,
+                    sub_model='JC')
     with pytest.raises(ValueError, match='length'):
-        LineageSequenceTracker(seq_pars, seed=0)
+        LineageSequenceTracker(evo_pars, seed=0)
 
 
 def test_tracker_seed_entry_branch_length_zero():

@@ -509,18 +509,17 @@ class Sim(cvb.BaseSim):
 
 
     def init_sequence_tracker(self):
-        ''' Initialize the sequence evolution tracker (no-op when seq_pars["enable"] is False) '''
-        if self['seq_pars']['enable']:
-            tracker = cvseq.LineageSequenceTracker(self['seq_pars'], seed=self['rand_seed'])
+        ''' Initialize the sequence evolution tracker (no-op when evo_pars["enable"] is False) '''
+        if self['evo_pars']['enable']:
+            ep = self['evo_pars']
+            tracker = cvseq.LineageSequenceTracker(ep, seed=self['rand_seed'])
 
-            # Instantiate the fitness model if enabled
-            fp = self['fitness_pars']
-            if fp['enable']:
-                model_key = fp.get('model', 'bloom_nt')
-                if model_key == 'bloom_nt':
-                    tracker.fitness_model = cvfit.BloomNtFitnessModel(fp['fitness_data_path'], scale=fp['scale'])
-                else:
-                    raise ValueError(f'Unknown fitness model "{model_key}"; choices: bloom_nt')
+            # Instantiate the fitness model (always active when evo_pars is enabled)
+            model_key = ep.get('fitness_model', 'bloom_nt')
+            if model_key == 'bloom_nt':
+                tracker.fitness_model = cvfit.BloomNtFitnessModel(ep['fitness_data_path'], scale=ep['fitness_scale'])
+            else:
+                raise ValueError(f'Unknown fitness model "{model_key}"; choices: bloom_nt')
 
             # Extract founding mutations for variants that supply a founding_fasta
             for v in self['variants']:
@@ -611,8 +610,6 @@ class Sim(cvb.BaseSim):
         contacts = people.update_contacts() # Compute new contacts
         hosp_max = people.count('severe')   > self['n_beds_hosp'] if self['n_beds_hosp'] is not None else False # Check for acute bed constraint
         icu_max  = people.count('critical') > self['n_beds_icu']  if self['n_beds_icu']  is not None else False # Check for ICU bed constraint
-        self.results['viral_load_hist'][:, self.t] = self.people.viral_load
-        self.results['viral_shedding_hist'][:, self.t] = self.people.viral_shedding
         # Randomly infect some people (imported infections)
         if self['n_imports']:
             n_imports = cvu.poisson(self['n_imports']/self.rescale_vec[self.t]) # Imported cases
@@ -641,8 +638,10 @@ class Sim(cvb.BaseSim):
         date_dead = people.date_dead
         viral_load = cvu.compute_viral_load(t, date_inf, date_rec, date_dead, frac_time, load_ratio, high_cap)
         viral_shedding = viral_load * people.rel_trans
-        self.people.viral_load= viral_load
+        self.people.viral_load    = viral_load
         self.people.viral_shedding = viral_shedding
+        self.results['viral_load_hist'][:, self.t]    = viral_load
+        self.results['viral_shedding_hist'][:, self.t] = viral_shedding
         # Shorten useful parameters
         nv = self['n_variants'] # Shorten number of variants
         sus = people.susceptible

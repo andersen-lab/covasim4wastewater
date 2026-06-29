@@ -119,21 +119,17 @@ def make_pars(set_prognoses=False, prog_by_age=True, version=None, **kwargs):
     pars['no_hosp_factor'] = 2.0  # Multiplier for how much more likely severely ill people are to become critical if no hospital beds are available
     pars['no_icu_factor']  = 2.0  # Multiplier for how much more likely critically ill people are to die if no ICU beds are available
 
-    # Sequence evolution parameters (disabled by default; see covasim/sequence_evolution.py)
-    pars['seq_pars'] = dict(
-        enable                = False,  # Master toggle; no overhead when False
-        L                     = 1000,   # Genome length in sites
-        reference             = None,   # ACGT str of length L, or path to a FASTA file (overrides L)
-        mol_clock_rate = 1e-5,   # μ: expected substitutions per site per day
-        model                 = 'JC',   # Substitution model key; currently only 'JC'
-    )
-
-    # Variant fitness parameters (disabled by default; see covasim/fitness.py)
-    pars['fitness_pars'] = dict(
-        enable       = False,           # Requires seq_pars['enable'] = True
-        model        = 'bloom_nt',      # Fitness model class; 'bloom_nt' → BloomNtFitnessModel
-        fitness_data_path = 'data/nt_fitness.csv',
-        scale        = 0.1,             # Scales log-fitness sum before exp(); tune to calibrate sweep speed
+    # Sequence evolution + variant fitness parameters (disabled by default)
+    # See covasim/sequence_evolution.py and covasim/fitness.py.
+    pars['evo_pars'] = dict(
+        enable            = False,                   # Master toggle; no overhead when False
+        L                 = 1000,                    # Genome length in sites
+        reference         = None,                    # ACGT str of length L, or path to FASTA (overrides L)
+        mol_clock_rate    = 1e-5,                    # μ: expected substitutions per site per day
+        sub_model         = 'JC',                    # Nucleotide substitution model; 'JC' = Jukes-Cantor
+        fitness_model     = 'bloom_nt',              # Fitness model; 'bloom_nt' → BloomNtFitnessModel
+        fitness_data_path = 'data/nt_fitness.csv',   # Path to Bloom lab nt_fitness.csv
+        fitness_scale     = 0.1,                     # Scales log-fitness sum before exp(); tune to calibrate sweep speed
     )
 
     # Handle vaccine and variant parameters
