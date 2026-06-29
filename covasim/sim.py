@@ -328,7 +328,8 @@ class Sim(cvb.BaseSim):
         self.results['pop_nabs']            = init_res('Population nab levels', scale=False, color=dcols.pop_nabs)
         self.results['pop_protection']      = init_res('Population immunity protection', scale=False, color=dcols.pop_protection)
         self.results['pop_symp_protection'] = init_res('Population symptomatic protection', scale=False, color=dcols.pop_symp_protection)
-
+        self.results['viral_load_hist'] = np.zeros((self['pop_size'], self.npts),dtype=cvd.default_float,)
+        self.results['viral_shedding_hist'] = np.zeros((self['pop_size'], self.npts),dtype=cvd.default_float,)
         # Handle variants
         nv = self['n_variants']
         self.results['variant'] = {}
@@ -610,7 +611,8 @@ class Sim(cvb.BaseSim):
         contacts = people.update_contacts() # Compute new contacts
         hosp_max = people.count('severe')   > self['n_beds_hosp'] if self['n_beds_hosp'] is not None else False # Check for acute bed constraint
         icu_max  = people.count('critical') > self['n_beds_icu']  if self['n_beds_icu']  is not None else False # Check for ICU bed constraint
-
+        self.results['viral_load_hist'][:, self.t] = self.people.viral_load
+        self.results['viral_shedding_hist'][:, self.t] = self.people.viral_shedding
         # Randomly infect some people (imported infections)
         if self['n_imports']:
             n_imports = cvu.poisson(self['n_imports']/self.rescale_vec[self.t]) # Imported cases
@@ -638,7 +640,9 @@ class Sim(cvb.BaseSim):
         date_rec = people.date_recovered
         date_dead = people.date_dead
         viral_load = cvu.compute_viral_load(t, date_inf, date_rec, date_dead, frac_time, load_ratio, high_cap)
-        self.people.viral_load[:, t] = viral_load
+        viral_shedding = viral_load * people.rel_trans
+        self.people.viral_load= viral_load
+        self.people.viral_shedding = viral_shedding
         # Shorten useful parameters
         nv = self['n_variants'] # Shorten number of variants
         sus = people.susceptible
@@ -681,7 +685,6 @@ class Sim(cvb.BaseSim):
                 quar_factor = cvd.default_float(self['quar_factor'][lkey])
                 beta_layer  = cvd.default_float(self['beta_layer'][lkey])
                 rel_trans, rel_sus = cvu.compute_trans_sus(prel_trans, prel_sus, inf_variant, sus, beta_layer, viral_load, symp, iso, quar, asymp_factor, iso_factor, quar_factor, sus_imm)
-
                 # Calculate actual transmission
                 pairs = [[p1,p2]] if not self._legacy_trans else [[p1,p2], [p2,p1]] # Support slower legacy method of calculation, but by default skip this loop
                 for p1,p2 in pairs:
