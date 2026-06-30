@@ -638,9 +638,9 @@ class Sim(cvb.BaseSim):
         date_dead = people.date_dead
         viral_load = cvu.compute_viral_load(t, date_inf, date_rec, date_dead, frac_time, load_ratio, high_cap)
         viral_shedding = viral_load * people.rel_trans
-        self.people.viral_load    = viral_load
+        self.people.viral_load     = viral_load
         self.people.viral_shedding = viral_shedding
-        self.results['viral_load_hist'][:, self.t]    = viral_load
+        self.results['viral_load_hist'][:, self.t]     = viral_load
         self.results['viral_shedding_hist'][:, self.t] = viral_shedding
         # Shorten useful parameters
         nv = self['n_variants'] # Shorten number of variants
