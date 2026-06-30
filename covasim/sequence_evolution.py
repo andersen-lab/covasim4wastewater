@@ -252,15 +252,27 @@ class LineageSequenceTracker:
         ref = evo_pars.get('reference')
         if ref is None:
             ref = 'A' * self.L
-        elif isinstance(ref, str) and os.path.isfile(ref):
-            # FASTA file path: read sequence and override L
-            seq_lines = []
-            with open(ref) as fh:
-                for line in fh:
-                    if not line.startswith('>'):
-                        seq_lines.append(line.strip())
-            ref = ''.join(seq_lines)
-            self.L = len(ref)
+        elif isinstance(ref, str):
+            _looks_like_path = (
+                ref.endswith(('.fasta', '.fa', '.fas', '.fna'))
+                or os.sep in ref
+                or '/' in ref
+            )
+            if _looks_like_path and not os.path.isfile(ref):
+                raise FileNotFoundError(
+                    f"evo_pars['reference'] path not found: '{ref}'. "
+                    f"Current working directory is '{os.getcwd()}'. "
+                    "Use an absolute path or ensure the file exists relative to the CWD."
+                )
+            if os.path.isfile(ref):
+                # FASTA file path: read sequence and override L
+                seq_lines = []
+                with open(ref) as fh:
+                    for line in fh:
+                        if not line.startswith('>'):
+                            seq_lines.append(line.strip())
+                ref = ''.join(seq_lines)
+                self.L = len(ref)
         if isinstance(ref, str):
             if len(ref) != self.L:
                 raise ValueError(f"evo_pars['reference'] has length {len(ref)} but L={self.L}")
