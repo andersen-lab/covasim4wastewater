@@ -20,13 +20,14 @@ from covasim.sequence_evolution import (
 
 def make_seq_sim(n_days=10, pop_size=200, pop_infected=10, rand_seed=42,
                  L=100, rate=1e-3, **evo_kwargs):
-    '''Small sim with sequence tracking enabled.'''
+    '''Small sim with sequence tracking enabled (fitness disabled by default).'''
     evo_pars = dict(
         enable=True,
         L=L,
         reference=None,
         mol_clock_rate=rate,
         sub_model='JC',
+        fitness_model=None,  # sequence-evolution tests don't need Bloom fitness data
         **evo_kwargs,
     )
     sim = cv.Sim(

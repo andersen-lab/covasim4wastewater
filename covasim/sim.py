@@ -514,12 +514,14 @@ class Sim(cvb.BaseSim):
             ep = self['evo_pars']
             tracker = cvseq.LineageSequenceTracker(ep, seed=self['rand_seed'])
 
-            # Instantiate the fitness model (always active when evo_pars is enabled)
+            # Instantiate the fitness model (None disables fitness; 'bloom_nt' loads Bloom lab data)
             model_key = ep.get('fitness_model', 'bloom_nt')
-            if model_key == 'bloom_nt':
+            if model_key is None:
+                tracker.fitness_model = None
+            elif model_key == 'bloom_nt':
                 tracker.fitness_model = cvfit.BloomNtFitnessModel(ep['fitness_data_path'], scale=ep['fitness_scale'])
             else:
-                raise ValueError(f'Unknown fitness model "{model_key}"; choices: bloom_nt')
+                raise ValueError(f'Unknown fitness model "{model_key}"; choices: bloom_nt, None')
 
             # Extract founding mutations for variants that supply a founding_fasta
             for v in self['variants']:
