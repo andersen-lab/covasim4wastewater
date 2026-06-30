@@ -278,6 +278,11 @@ class BaseSim(ParsObj):
             if pars.get('prog_by_age'):
                 pars['prognoses'] = cvpar.get_prognoses(by_age=pars['prog_by_age'], version=self._default_ver) # Reset prognoses
 
+            # Merge nested evo_pars with defaults so a partial user dict doesn't
+            # silently drop keys like fitness_scale that weren't supplied.
+            if 'evo_pars' in pars and hasattr(self, 'pars') and 'evo_pars' in self.pars:
+                pars['evo_pars'] = sc.mergedicts(self.pars['evo_pars'], pars['evo_pars'])
+
             # Call update_pars() for ParsObj
             super().update_pars(pars=pars, create=create)
 
