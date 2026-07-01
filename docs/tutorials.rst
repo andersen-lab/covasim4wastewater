@@ -15,4 +15,4 @@
     tutorials/tut_tips.ipynb
     tutorials/tut_advanced.ipynb
     tutorials/tut_wastewater.ipynb
-    
+    tutorials/tut_sequence_evol.ipynb
