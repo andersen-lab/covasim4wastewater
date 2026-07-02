@@ -5,6 +5,9 @@ jobs:
   install_and_test:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      checks: write
+      pull-requests: write
     strategy:
       fail-fast: false
       max-parallel: 8
@@ -27,4 +30,4 @@ jobs:
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
         with:
-          junit_files: tests/test-results.xml
+          files: tests/test-results.xml
