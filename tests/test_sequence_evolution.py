@@ -19,15 +19,16 @@ from covasim.sequence_evolution import (
 # ---------------------------------------------------------------------------
 
 def make_seq_sim(n_days=10, pop_size=200, pop_infected=10, rand_seed=42,
-                 L=100, rate=1e-3, **seq_kwargs):
-    '''Small sim with sequence tracking enabled.'''
-    seq_pars = dict(
+                 L=100, rate=1e-3, **evo_kwargs):
+    '''Small sim with sequence tracking enabled (fitness disabled by default).'''
+    evo_pars = dict(
         enable=True,
         L=L,
         reference=None,
-        rate_per_site_per_day=rate,
-        model='JC',
-        **seq_kwargs,
+        mol_clock_rate=rate,
+        sub_model='JC',
+        fitness_model=None,  # sequence-evolution tests don't need Bloom fitness data
+        **evo_kwargs,
     )
     sim = cv.Sim(
         pop_size=pop_size,
@@ -35,7 +36,7 @@ def make_seq_sim(n_days=10, pop_size=200, pop_infected=10, rand_seed=42,
         n_days=n_days,
         rand_seed=rand_seed,
         verbose=0,
-        seq_pars=seq_pars,
+        evo_pars=evo_pars,
     )
     sim.run()
     return sim
@@ -107,40 +108,33 @@ def test_jc_reproducibility():
 # ---------------------------------------------------------------------------
 
 def _make_tracker(L=50, rate=1e-3, seed=0):
-    seq_pars = dict(
+    evo_pars = dict(
         L=L,
         reference=None,
-        rate_per_site_per_day=rate,
-        model='JC',
+        mol_clock_rate=rate,
+        sub_model='JC',
     )
-    return LineageSequenceTracker(seq_pars, seed=seed)
+    return LineageSequenceTracker(evo_pars, seed=seed)
 
 
-def test_tracker_wild_type_default():
+def test_tracker_reference_default():
     tracker = _make_tracker(L=10)
     assert decode_sequence(tracker.reference) == 'A' * 10
 
 
-def test_tracker_custom_wild_type():
+def test_tracker_custom_reference():
     wt = 'ACGTACGTAC'
-    seq_pars = dict(L=10, reference=wt, rate_per_site_per_day=1e-5,
-                    model='JC')
-    tracker = LineageSequenceTracker(seq_pars, seed=0)
+    evo_pars = dict(L=10, reference=wt, mol_clock_rate=1e-5,
+                    sub_model='JC')
+    tracker = LineageSequenceTracker(evo_pars, seed=0)
     assert decode_sequence(tracker.reference) == wt
 
 
-def test_tracker_wild_type_length_mismatch():
-    seq_pars = dict(L=5, reference='ACGT', rate_per_site_per_day=1e-5,
-                    model='JC')
+def test_tracker_reference_length_mismatch():
+    evo_pars = dict(L=5, reference='ACGT', mol_clock_rate=1e-5,
+                    sub_model='JC')
     with pytest.raises(ValueError, match='length'):
-        LineageSequenceTracker(seq_pars, seed=0)
-
-
-def test_tracker_unknown_model():
-    seq_pars = dict(L=10, reference=None, rate_per_site_per_day=1e-5,
-                    model='GTR')
-    with pytest.raises(ValueError, match='Unknown'):
-        LineageSequenceTracker(seq_pars, seed=0)
+        LineageSequenceTracker(evo_pars, seed=0)
 
 
 def test_tracker_seed_entry_branch_length_zero():

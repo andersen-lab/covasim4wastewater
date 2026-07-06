@@ -17,6 +17,7 @@ from . import interventions as cvi
 from . import immunity as cvimm
 from . import analysis as cva
 from . import sequence_evolution as cvseq
+from . import fitness as cvfit
 from .settings import options as cvo
 
 # Almost everything in this file is contained in the Sim class
@@ -327,7 +328,8 @@ class Sim(cvb.BaseSim):
         self.results['pop_nabs']            = init_res('Population nab levels', scale=False, color=dcols.pop_nabs)
         self.results['pop_protection']      = init_res('Population immunity protection', scale=False, color=dcols.pop_protection)
         self.results['pop_symp_protection'] = init_res('Population symptomatic protection', scale=False, color=dcols.pop_symp_protection)
-
+        self.results['viral_load_hist'] = np.zeros((self['pop_size'], self.npts),dtype=cvd.default_float,)
+        self.results['viral_shedding_hist'] = np.zeros((self['pop_size'], self.npts),dtype=cvd.default_float,)
         # Handle variants
         nv = self['n_variants']
         self.results['variant'] = {}
@@ -507,9 +509,28 @@ class Sim(cvb.BaseSim):
 
 
     def init_sequence_tracker(self):
-        ''' Initialize the sequence evolution tracker (no-op when seq_pars["enable"] is False) '''
-        if self['seq_pars']['enable']:
-            self.sequence_tracker = cvseq.LineageSequenceTracker(self['seq_pars'], seed=self['rand_seed'])
+        ''' Initialize the sequence evolution tracker (no-op when evo_pars["enable"] is False) '''
+        if self['evo_pars']['enable']:
+            ep = self['evo_pars']
+            tracker = cvseq.LineageSequenceTracker(ep, seed=self['rand_seed'])
+
+            # Instantiate the fitness model (None disables fitness; 'bloom_nt' loads Bloom lab data)
+            model_key = ep.get('fitness_model', 'bloom_nt')
+            if model_key is None:
+                tracker.fitness_model = None
+            elif model_key == 'bloom_nt':
+                tracker.fitness_model = cvfit.BloomNtFitnessModel(ep['fitness_data_path'], scale=ep['fitness_scale'])
+            else:
+                raise ValueError(f'Unknown fitness model "{model_key}"; choices: bloom_nt, None')
+
+            # Extract founding mutations for variants that supply a founding_fasta
+            for v in self['variants']:
+                if getattr(v, 'founding_fasta', None) is not None:
+                    tracker.variant_founding_mutations[v.label] = cvseq.extract_founding_mutations(
+                        v.founding_fasta, tracker.reference
+                    )
+
+            self.sequence_tracker = tracker
         else:
             self.sequence_tracker = None
         return
@@ -591,7 +612,6 @@ class Sim(cvb.BaseSim):
         contacts = people.update_contacts() # Compute new contacts
         hosp_max = people.count('severe')   > self['n_beds_hosp'] if self['n_beds_hosp'] is not None else False # Check for acute bed constraint
         icu_max  = people.count('critical') > self['n_beds_icu']  if self['n_beds_icu']  is not None else False # Check for ICU bed constraint
-
         # Randomly infect some people (imported infections)
         if self['n_imports']:
             n_imports = cvu.poisson(self['n_imports']/self.rescale_vec[self.t]) # Imported cases
@@ -619,7 +639,11 @@ class Sim(cvb.BaseSim):
         date_rec = people.date_recovered
         date_dead = people.date_dead
         viral_load = cvu.compute_viral_load(t, date_inf, date_rec, date_dead, frac_time, load_ratio, high_cap)
-        self.people.viral_load[:, t] = viral_load
+        viral_shedding = viral_load * people.rel_trans
+        self.people.viral_load     = viral_load
+        self.people.viral_shedding = viral_shedding
+        self.results['viral_load_hist'][:, self.t]     = viral_load
+        self.results['viral_shedding_hist'][:, self.t] = viral_shedding
         # Shorten useful parameters
         nv = self['n_variants'] # Shorten number of variants
         sus = people.susceptible
@@ -630,6 +654,14 @@ class Sim(cvb.BaseSim):
 
         prel_trans = people.rel_trans
         prel_sus   = people.rel_sus
+
+        # Scale per-agent transmissibility by haplotype fitness if fitness model is active
+        _seq_tracker = getattr(self, 'sequence_tracker', None)
+        if _seq_tracker is not None and _seq_tracker.fitness_model is not None:
+            _fitness = np.ones(len(people), dtype=prel_trans.dtype)
+            for _i in np.where(people.infectious)[0]:
+                _fitness[_i] = _seq_tracker.get_fitness_multiplier(_i)
+            prel_trans = prel_trans * _fitness  # new array; does not modify people.rel_trans
 
         # Iterate through n_variants to calculate infections
         for variant in range(nv):
@@ -654,7 +686,6 @@ class Sim(cvb.BaseSim):
                 quar_factor = cvd.default_float(self['quar_factor'][lkey])
                 beta_layer  = cvd.default_float(self['beta_layer'][lkey])
                 rel_trans, rel_sus = cvu.compute_trans_sus(prel_trans, prel_sus, inf_variant, sus, beta_layer, viral_load, symp, iso, quar, asymp_factor, iso_factor, quar_factor, sus_imm)
-
                 # Calculate actual transmission
                 pairs = [[p1,p2]] if not self._legacy_trans else [[p1,p2], [p2,p1]] # Support slower legacy method of calculation, but by default skip this loop
                 for p1,p2 in pairs:

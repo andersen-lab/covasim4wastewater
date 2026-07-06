@@ -2,12 +2,12 @@
 Wastewater sampling analyzer for Covasim.
 
 WastewaterSampler is a cv.Analyzer that, at specified time points, snapshots
-the set of circulating viral genotypes and their relative proportions weighted
-by individual viral load — i.e. what a wastewater sample would look like.
+the set of circulating viral haplotypes and their relative proportions weighted
+by individual viral shedding — i.e. what a wastewater sample would look like.
 Snapshots can be exported as FASTA or fed directly to Bygul's
 simulate_proportions to generate synthetic sequencing reads.
 
-Requires pars['seq_pars']['enable'] = True.
+Requires pars['evo_pars']['enable'] = True.
 '''
 
 import dataclasses
@@ -15,8 +15,6 @@ from collections import defaultdict
 
 import numpy as np
 
-import covasim.utils    as cvu
-import covasim.defaults as cvd
 from .analysis import Analyzer
 
 __all__ = ['WastewaterSampler', 'WastewaterSample']
@@ -24,47 +22,46 @@ __all__ = ['WastewaterSampler', 'WastewaterSample']
 
 @dataclasses.dataclass
 class WastewaterSample:
-    '''Snapshot of circulating genotypes and their viral-load-weighted proportions.'''
+    '''Snapshot of circulating haplotypes and their viral-shedding-weighted proportions.'''
     day:          int
     date:         str
-    sequences:    list   # deduplicated ACGT strings, one per distinct genotype
-    proportions:  list   # normalized viral-load fractions, sums to 1.0
-    raw_loads:    list   # un-normalized total viral load per genotype
-    n_infectious: int    # number of currently infectious agents
-    n_genotypes:  int    # number of distinct sequences present
-    # add region eventually
+    sequences:    list  # deduplicated ACGT strings, one per distinct haplotype
+    proportions:  list  # normalized viral-shedding fractions, sums to 1.0
+    raw_loads:    list  # un-normalized total viral shedding per haplotype
+    n_infectious: int   # number of currently infectious agents
+    n_genotypes:  int   # number of distinct haplotypes present
 
 
 class WastewaterSampler(Analyzer):
     '''
-    Analyzer that snapshots the viral genotype mixture present in a wastewater
+    Analyzer that snapshots the viral haplotype mixture present in a wastewater
     sample at one or more time points.
 
     For each sampled day:
       1. Identifies all currently infectious agents.
-      2. Computes each agent's viral load using the same model as the sim's
-         transmission loop (cvu.compute_viral_load).
+      2. Reads each agent's viral shedding from ``sim.people.viral_shedding``
+         (``viral_load × rel_trans``), which is updated by ``sim.step()`` before
+         analyzers are called.
       3. Retrieves each agent's evolved haplotype from LineageSequenceTracker.
-      4. Groups identical haplotypes and sums their viral load contributions.
+      4. Groups identical haplotypes and sums their viral shedding contributions.
       5. Normalizes to proportions.
 
     Snapshots are stored in self.samples (dict: int day → WastewaterSample).
-    Use to_fasta(day) to get a multi-FASTA string, or simulate(day, ...) to
-    pass the mixture directly to Bygul.
+    Use to_fasta(day) to get a multi-FASTA string, or simulate_sample(day, ...)
+    to pass the mixture directly to Bygul.
+
+    Requires pars['evo_pars']['enable'] = True.
 
     Args:
-        days   (list): simulation days (int) or calendar date strings to sample.
-        label  (str):  optional label for the analyzer.
+        days  (list): simulation days (int) or calendar date strings to sample.
+        label (str):  optional label for the analyzer.
 
     Example::
 
-        ww = cv.WastewaterSampler(days=['2020-06-01', 200])
+        ww = cv.WastewaterSampler(days=[56, 120])
         sim = cv.Sim(pars, analyzers=[ww])
         sim.run()
-
-        sample = ww.samples[150]
-        print(ww.to_fasta(150))
-        ww.simulate(150, outdir='./reads/', n_reads=10_000)
+        print(ww.to_fasta(56))
     '''
 
     def __init__(self, days, label=None):
@@ -74,9 +71,9 @@ class WastewaterSampler(Analyzer):
 
     def initialize(self, sim):
         super().initialize(sim)
-        if not sim['seq_pars'].get('enable', False):
+        if not sim['evo_pars'].get('enable', False):
             raise ValueError(
-                "WastewaterSampler requires pars['seq_pars']['enable'] = True"
+                "WastewaterSampler requires pars['evo_pars']['enable'] = True"
             )
         # Convert string dates to integer days
         self._day_set = set()
@@ -89,34 +86,18 @@ class WastewaterSampler(Analyzer):
         self._take_sample(sim)
 
     def _take_sample(self, sim):
-        people  = sim.people
-        tracker = people.sequence_tracker
-
         # Infectious agents only
-        inds = np.nonzero(people.infectious)[0]
+        inds = np.nonzero(sim.people.infectious)[0]
 
         if len(inds) == 0:
             self.samples[sim.t] = None
             return
 
-        # Viral load per agent (same parameterization as sim.py lines 615-621)
-        frac_time = cvd.default_float(sim['viral_dist']['frac_time'])
-        load_ratio = cvd.default_float(sim['viral_dist']['load_ratio'])
-        high_cap   = cvd.default_float(sim['viral_dist']['high_cap'])
+        loads   = sim.people.viral_shedding[inds]
+        tracker = sim.people.sequence_tracker
 
-        viral_load = cvu.compute_viral_load(
-            sim.t,
-            people.date_infectious,
-            people.date_recovered,
-            people.date_dead,
-            frac_time, load_ratio, high_cap,
-        )
-        loads = viral_load[inds]
-
-        # Haplotype per infectious agent
         haplotypes = [tracker.reconstruct_haplotype(int(i)) for i in inds]
 
-        # Aggregate viral load by identical sequence
         load_by_seq = defaultdict(float)
         for hap, load in zip(haplotypes, loads):
             load_by_seq[hap] += float(load)
@@ -138,7 +119,7 @@ class WastewaterSampler(Analyzer):
         )
 
     def to_fasta(self, day):
-        '''Return a multi-FASTA string for the genotype mixture on the given day.'''
+        '''Return a multi-FASTA string for the haplotype mixture on the given day.'''
         sample = self.samples[day]
         if sample is None:
             return ''
@@ -150,7 +131,7 @@ class WastewaterSampler(Analyzer):
 
     def simulate_sample(self, day, primers, reference, outdir='./reads/', readcnt=500, redo=False, **bygul_kwargs):
         '''
-        Write per-genotype FASTA files and invoke Bygul's simulate_proportions CLI.
+        Write per-haplotype FASTA files and invoke Bygul's simulate_proportions CLI.
 
         Bygul's simulate_proportions command is a Click CLI that expects genome
         sequences as on-disk FASTA files. This method writes temporary FASTA files,
@@ -186,7 +167,7 @@ class WastewaterSampler(Analyzer):
             raise ValueError(f"No infectious agents were present on day {day}; cannot simulate.")
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Write each unique genotype to its own FASTA file
+            # Write each unique haplotype to its own FASTA file
             fasta_paths = []
             for i, seq in enumerate(sample.sequences):
                 path = os.path.join(tmpdir, f'genotype_{i}.fasta')
@@ -210,7 +191,7 @@ class WastewaterSampler(Analyzer):
                     '--proportions', proportions_str,
                     '--outdir', outdir,
                     '--readcnt', str(readcnt),
-                    ]   
+                    ]
 
             for key, val in bygul_kwargs.items():
                 args.extend([f'--{key}', str(val)])

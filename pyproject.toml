@@ -37,6 +37,7 @@ dependencies = [
     "matplotlib",
     "sciris>=2.0.4",
     "bygul>=3.1",
+    "biopython>=1.79",
 ]
 dynamic = ["version"]
 

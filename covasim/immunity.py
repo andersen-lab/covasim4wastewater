@@ -20,11 +20,12 @@ class variant(sc.prettyobj):
     Add a new variant to the sim
 
     Args:
-        variant (str/dict): name of variant, or dictionary of parameters specifying information about the variant
+        variant (str/dict): name of variant, or dictionary of parameters specifying information about the variant; if None (default), all variant parameters are populated with defaults (useful when founding_fasta drives fitness via the fitness model)
         days   (int/list): day(s) on which new variant is introduced
         label       (str): if variant is supplied as a dict, the name of the variant
         n_imports   (int): the number of imports of the variant to be added
         rescale    (bool): whether the number of imports should be rescaled with the population
+        founding_fasta (str): optional path to a FASTA file whose mutations seed the variant haplotype; when provided, the fitness model overrides rel_beta so variant need not be specified
 
     **Example**::
 
@@ -33,12 +34,14 @@ class variant(sc.prettyobj):
         my_var  = cv.variant(variant={'rel_beta': 2.5}, label='My variant', days=20)
         sim     = cv.Sim(variants=[alpha, p1, my_var]).run() # Add them all to the sim
         sim2    = cv.Sim(variants=cv.variant('alpha', days=0, n_imports=20), pop_infected=0).run() # Replace default variant with alpha
+        xbb15   = cv.variant(label='XBB.1.5', days=100, n_imports=50, founding_fasta='xbb15_consensus.fasta') # Fitness from FASTA
     '''
 
-    def __init__(self, variant, days, label=None, n_imports=1, rescale=True):
+    def __init__(self, variant=None, days=None, label=None, n_imports=1, rescale=True, founding_fasta=None):
         self.days = days # Handle inputs
         self.n_imports = int(n_imports)
         self.rescale   = rescale
+        self.founding_fasta = founding_fasta # Optional path to founding genotype FASTA; mutations extracted during sim.init_sequence_tracker()
         self.index     = None # Index of the variant in the sim; set later
         self.label     = None # Variant label (used as a dict key)
         self.p         = None # This is where the parameters will be stored
@@ -49,6 +52,10 @@ class variant(sc.prettyobj):
 
     def parse(self, variant=None, label=None):
         ''' Unpack variant information, which may be given as either a string or a dict '''
+
+        # Treat None as an empty dict so all parameters are populated with defaults
+        if variant is None:
+            variant = {}
 
         # Option 1: variants can be chosen from a list of pre-defined variants
         if isinstance(variant, str):
