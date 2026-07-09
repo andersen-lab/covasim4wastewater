@@ -52,13 +52,14 @@ def _decode_mutations(mutations, reference):
 @dataclasses.dataclass
 class WastewaterSample:
     '''Snapshot of circulating haplotypes and their viral-shedding-weighted proportions.'''
-    day:           int
-    date:          str
-    mutation_sets: list  # deduplicated frozensets of (site_0idx, ref_nt_int, alt_nt_int), one per distinct haplotype
-    proportions:   list  # normalized viral-shedding fractions, sums to 1.0
-    raw_loads:     list  # un-normalized total viral shedding per haplotype
-    n_infectious:  int   # number of currently infectious agents
-    n_genotypes:   int   # number of distinct haplotypes present
+    day:            int
+    date:           str
+    mutation_sets:  list  # deduplicated frozensets of (site_0idx, ref_nt_int, alt_nt_int), one per distinct haplotype
+    variant_labels: list  # variant label string for each distinct haplotype
+    proportions:    list  # normalized viral-shedding fractions, sums to 1.0
+    raw_loads:      list  # un-normalized total viral shedding per haplotype
+    n_infectious:   int   # number of currently infectious agents
+    n_genotypes:    int   # number of distinct haplotypes present
 
 
 class WastewaterSampler(Analyzer):
@@ -125,14 +126,22 @@ class WastewaterSampler(Analyzer):
             self.samples[sim.t] = None
             return
 
-        loads   = sim.people.viral_shedding[inds]
-        tracker = sim.people.sequence_tracker
-        ref     = self._reference
+        loads       = sim.people.viral_shedding[inds]
+        tracker     = sim.people.sequence_tracker
+        ref         = self._reference
+        variant_map = sim.pars.get('variant_map', {})
 
-        load_by_muts = defaultdict(float)
+        load_by_muts  = defaultdict(float)
+        label_by_muts = {}   # first-seen variant label per distinct haplotype
         for idx, load in zip(inds, loads):
-            muts = _agent_mutations(tracker, int(idx), ref)
+            i    = int(idx)
+            muts = _agent_mutations(tracker, i, ref)
             load_by_muts[muts] += float(load)
+            if muts not in label_by_muts:
+                v = sim.people.infectious_variant[i]
+                label_by_muts[muts] = (
+                    variant_map.get(int(v), 'wild') if not np.isnan(v) else 'wild'
+                )
 
         total         = sum(load_by_muts.values())
         mutation_sets = list(load_by_muts.keys())
@@ -141,13 +150,14 @@ class WastewaterSampler(Analyzer):
         proportions[-1] = 1.0 - sum(proportions[:-1])
 
         self.samples[sim.t] = WastewaterSample(
-            day           = sim.t,
-            date          = sim.date(sim.t),
-            mutation_sets = mutation_sets,
-            proportions   = proportions,
-            raw_loads     = raw_loads,
-            n_infectious  = int(len(inds)),
-            n_genotypes   = len(mutation_sets),
+            day            = sim.t,
+            date           = sim.date(sim.t),
+            mutation_sets  = mutation_sets,
+            variant_labels = [label_by_muts[m] for m in mutation_sets],
+            proportions    = proportions,
+            raw_loads      = raw_loads,
+            n_infectious   = int(len(inds)),
+            n_genotypes    = len(mutation_sets),
         )
 
     def to_fasta(self, day):
@@ -157,8 +167,8 @@ class WastewaterSampler(Analyzer):
             return ''
         ref   = self._reference
         lines = []
-        for i, (muts, prop) in enumerate(zip(sample.mutation_sets, sample.proportions)):
-            lines.append(f'>genotype_{i}  proportion={prop:.8f}  day={day}  date={sample.date}')
+        for i, (muts, prop, vlabel) in enumerate(zip(sample.mutation_sets, sample.proportions, sample.variant_labels)):
+            lines.append(f'>genotype_{i}  proportion={prop:.8f}  day={day}  date={sample.date}  variant={vlabel}')
             lines.append(_decode_mutations(muts, ref))
         return '\n'.join(lines)
 
