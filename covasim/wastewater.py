@@ -4,6 +4,8 @@ Wastewater sampling analyzer for Covasim.
 WastewaterSampler is a cv.Analyzer that, at specified time points, snapshots
 the set of circulating viral haplotypes and their relative proportions weighted
 by individual viral shedding — i.e. what a wastewater sample would look like.
+Haplotypes are stored as frozensets of (site_0indexed, ref_nt_int, alt_nt_int)
+mutation tuples relative to the simulation reference sequence.
 Snapshots can be exported as FASTA or fed directly to Bygul's
 simulate_proportions to generate synthetic sequencing reads.
 
@@ -16,20 +18,47 @@ from collections import defaultdict
 import numpy as np
 
 from .analysis import Analyzer
+from .sequence_evolution import decode_sequence
 
 __all__ = ['WastewaterSampler', 'WastewaterSample']
+
+
+def _agent_mutations(tracker, agent_idx, reference):
+    '''
+    Return the mutation frozenset for agent_idx.
+
+    Prefers tracker.agent_mutations (populated when fitness tracking is active).
+    Falls back to diffing _episode_roots against the reference when the key is
+    absent — O(L) but only called on sampling days.
+    '''
+    if agent_idx in tracker.agent_mutations:
+        return tracker.agent_mutations[agent_idx]
+    root = tracker._episode_roots.get(agent_idx, reference)
+    return frozenset(
+        (j, int(reference[j]), int(root[j]))
+        for j in range(len(reference))
+        if root[j] != reference[j]
+    )
+
+
+def _decode_mutations(mutations, reference):
+    '''Reconstruct an ACGT string from a mutation frozenset and reference uint8 array.'''
+    seq = reference.copy()
+    for site, _ref_nt, alt_nt in mutations:
+        seq[site] = alt_nt
+    return decode_sequence(seq)
 
 
 @dataclasses.dataclass
 class WastewaterSample:
     '''Snapshot of circulating haplotypes and their viral-shedding-weighted proportions.'''
-    day:          int
-    date:         str
-    sequences:    list  # deduplicated ACGT strings, one per distinct haplotype
-    proportions:  list  # normalized viral-shedding fractions, sums to 1.0
-    raw_loads:    list  # un-normalized total viral shedding per haplotype
-    n_infectious: int   # number of currently infectious agents
-    n_genotypes:  int   # number of distinct haplotypes present
+    day:           int
+    date:          str
+    mutation_sets: list  # deduplicated frozensets of (site_0idx, ref_nt_int, alt_nt_int), one per distinct haplotype
+    proportions:   list  # normalized viral-shedding fractions, sums to 1.0
+    raw_loads:     list  # un-normalized total viral shedding per haplotype
+    n_infectious:  int   # number of currently infectious agents
+    n_genotypes:   int   # number of distinct haplotypes present
 
 
 class WastewaterSampler(Analyzer):
@@ -42,8 +71,9 @@ class WastewaterSampler(Analyzer):
       2. Reads each agent's viral shedding from ``sim.people.viral_shedding``
          (``viral_load × rel_trans``), which is updated by ``sim.step()`` before
          analyzers are called.
-      3. Retrieves each agent's evolved haplotype from LineageSequenceTracker.
-      4. Groups identical haplotypes and sums their viral shedding contributions.
+      3. Retrieves each agent's mutation frozenset from LineageSequenceTracker.
+      4. Groups identical haplotypes (by frozenset identity) and sums their
+         viral shedding contributions.
       5. Normalizes to proportions.
 
     Snapshots are stored in self.samples (dict: int day → WastewaterSample).
@@ -68,6 +98,7 @@ class WastewaterSampler(Analyzer):
         super().__init__(label=label)
         self._days_input = days  # raw user input; converted in initialize()
         self.samples     = {}
+        self._reference  = None  # set in initialize()
 
     def initialize(self, sim):
         super().initialize(sim)
@@ -75,6 +106,7 @@ class WastewaterSampler(Analyzer):
             raise ValueError(
                 "WastewaterSampler requires pars['evo_pars']['enable'] = True"
             )
+        self._reference = sim.people.sequence_tracker.reference
         # Convert string dates to integer days
         self._day_set = set()
         for d in self._days_input:
@@ -95,27 +127,27 @@ class WastewaterSampler(Analyzer):
 
         loads   = sim.people.viral_shedding[inds]
         tracker = sim.people.sequence_tracker
+        ref     = self._reference
 
-        haplotypes = [tracker.reconstruct_haplotype(int(i)) for i in inds]
+        load_by_muts = defaultdict(float)
+        for idx, load in zip(inds, loads):
+            muts = _agent_mutations(tracker, int(idx), ref)
+            load_by_muts[muts] += float(load)
 
-        load_by_seq = defaultdict(float)
-        for hap, load in zip(haplotypes, loads):
-            load_by_seq[hap] += float(load)
-
-        total       = sum(load_by_seq.values())
-        sequences   = list(load_by_seq.keys())
-        raw_loads   = [load_by_seq[s] for s in sequences]
-        proportions = [v / total for v in raw_loads]
+        total         = sum(load_by_muts.values())
+        mutation_sets = list(load_by_muts.keys())
+        raw_loads     = [load_by_muts[m] for m in mutation_sets]
+        proportions   = [v / total for v in raw_loads]
         proportions[-1] = 1.0 - sum(proportions[:-1])
 
         self.samples[sim.t] = WastewaterSample(
-            day          = sim.t,
-            date         = sim.date(sim.t),
-            sequences    = sequences,
-            proportions  = proportions,
-            raw_loads    = raw_loads,
-            n_infectious = int(len(inds)),
-            n_genotypes  = len(sequences),
+            day           = sim.t,
+            date          = sim.date(sim.t),
+            mutation_sets = mutation_sets,
+            proportions   = proportions,
+            raw_loads     = raw_loads,
+            n_infectious  = int(len(inds)),
+            n_genotypes   = len(mutation_sets),
         )
 
     def to_fasta(self, day):
@@ -123,10 +155,11 @@ class WastewaterSampler(Analyzer):
         sample = self.samples[day]
         if sample is None:
             return ''
+        ref   = self._reference
         lines = []
-        for i, (seq, prop) in enumerate(zip(sample.sequences, sample.proportions)):
+        for i, (muts, prop) in enumerate(zip(sample.mutation_sets, sample.proportions)):
             lines.append(f'>genotype_{i}  proportion={prop:.8f}  day={day}  date={sample.date}')
-            lines.append(seq)
+            lines.append(_decode_mutations(muts, ref))
         return '\n'.join(lines)
 
     def simulate_sample(self, day, primers, reference, outdir='./reads/', readcnt=500, redo=False, **bygul_kwargs):
@@ -168,11 +201,12 @@ class WastewaterSampler(Analyzer):
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Write each unique haplotype to its own FASTA file
+            ref         = self._reference
             fasta_paths = []
-            for i, seq in enumerate(sample.sequences):
+            for i, muts in enumerate(sample.mutation_sets):
                 path = os.path.join(tmpdir, f'genotype_{i}.fasta')
                 with open(path, 'w') as fh:
-                    fh.write(f'>genotype_{i}\n{seq}\n')
+                    fh.write(f'>genotype_{i}\n{_decode_mutations(muts, ref)}\n')
                 fasta_paths.append(path)
 
             genomes_str = ','.join(fasta_paths)

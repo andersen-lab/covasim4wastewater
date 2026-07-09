@@ -31,5 +31,6 @@ from .run                import * # Depends on sim
 from .fitness           import * # Optional; enabled via pars['evo_pars']['enable']
 from .sequence_evolution import * # Optional; enabled via pars['evo_pars']['enable']
 from .wastewater         import * # Optional; requires evo_pars['enable'] = True and bygul
+from .clinical           import * # Optional; requires evo_pars['enable'] = True
 
 
