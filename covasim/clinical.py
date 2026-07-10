@@ -138,6 +138,7 @@ class ClinicalSequencer(Analyzer):
         self.pool        = _coerce_pool(pool)
         self.samples     = {}
         self._reference  = None  # set in initialize()
+        self._rng        = None  # set in initialize()
 
     def initialize(self, sim):
         super().initialize(sim)
@@ -146,6 +147,7 @@ class ClinicalSequencer(Analyzer):
                 "ClinicalSequencer requires pars['evo_pars']['enable'] = True"
             )
         self._reference = sim.people.sequence_tracker.reference
+        self._rng       = np.random.default_rng(sim['rand_seed'])
 
         # Build {day_int: n_samples} lookup
         if isinstance(self._days_input, dict):
@@ -192,7 +194,7 @@ class ClinicalSequencer(Analyzer):
             )
             sampled_inds = pool_inds
         else:
-            sampled_inds = np.random.choice(pool_inds, size=n, replace=False)
+            sampled_inds = self._rng.choice(pool_inds, size=n, replace=False)
 
         variant_map = sim.pars.get('variant_map', {})
         date        = sim.date(sim.t)
