@@ -13,6 +13,7 @@ Requires pars['evo_pars']['enable'] = True.
 '''
 
 import dataclasses
+import enum
 import warnings
 
 import numpy as np
@@ -20,7 +21,27 @@ import numpy as np
 from .analysis import Analyzer
 from .sequence_evolution import decode_sequence
 
-__all__ = ['ClinicalSequencer', 'ClinicalSample']
+__all__ = ['ClinicalPool', 'ClinicalSequencer', 'ClinicalSample']
+
+
+class ClinicalPool(enum.Enum):
+    '''Agent pools eligible for clinical sequencing sampling.'''
+    infectious  = 'infectious'
+    symptomatic = 'symptomatic'
+    diagnosed   = 'diagnosed'
+
+
+def _coerce_pool(pool):
+    '''Accept a ClinicalPool or pool name string.'''
+    if isinstance(pool, ClinicalPool):
+        return pool
+    if isinstance(pool, str):
+        try:
+            return ClinicalPool(pool)
+        except ValueError:
+            valid = [p.value for p in ClinicalPool]
+            raise ValueError(f"pool must be one of {valid}, got '{pool}'")
+    raise TypeError(f"pool must be a ClinicalPool or str, got {type(pool)}")
 
 
 def _agent_mutations(tracker, agent_idx, reference):
@@ -91,11 +112,14 @@ class ClinicalSequencer(Analyzer):
                                  per-day counts.
         n_samples (int):         Number of agents to sample per day when ``days``
                                  is a list.  Ignored when ``days`` is a dict.
-        pool      (str):         Which agents are eligible for sampling.
-                                 ``'symptomatic'`` (default) — infectious agents
-                                 who are also currently symptomatic.
-                                 ``'infectious'`` — all currently infectious agents.
-                                 ``'diagnosed'`` — agents with a confirmed diagnosis.
+        pool      (str or ClinicalPool): Which agents are eligible for sampling.
+                                 ``ClinicalPool.diagnosed`` (default) — agents with a
+                                 confirmed diagnosis.
+                                 ``ClinicalPool.infectious`` — all currently infectious
+                                 agents.
+                                 ``ClinicalPool.symptomatic`` — infectious agents who
+                                 are also currently symptomatic.  Equivalent string
+                                 values are also accepted.
         label     (str):         Optional label for the analyzer.
 
     Example::
@@ -107,11 +131,11 @@ class ClinicalSequencer(Analyzer):
         print(cs.to_fasta(56))
     '''
 
-    def __init__(self, days, n_samples=None, pool='symptomatic', label=None):
+    def __init__(self, days, n_samples=None, pool='diagnosed', label=None):
         super().__init__(label=label)
         self._days_input = days
         self._n_samples  = n_samples
-        self.pool        = pool
+        self.pool        = _coerce_pool(pool)
         self.samples     = {}
         self._reference  = None  # set in initialize()
 
@@ -120,11 +144,6 @@ class ClinicalSequencer(Analyzer):
         if not sim['evo_pars'].get('enable', False):
             raise ValueError(
                 "ClinicalSequencer requires pars['evo_pars']['enable'] = True"
-            )
-        valid_pools = ('infectious', 'symptomatic', 'diagnosed')
-        if self.pool not in valid_pools:
-            raise ValueError(
-                f"pool must be one of {valid_pools}, got '{self.pool}'"
             )
         self._reference = sim.people.sequence_tracker.reference
 
@@ -154,11 +173,11 @@ class ClinicalSequencer(Analyzer):
         ref     = self._reference
 
         # Build the eligible pool
-        if self.pool == 'infectious':
+        if self.pool == ClinicalPool.infectious:
             pool_inds = np.nonzero(people.infectious)[0]
-        elif self.pool == 'symptomatic':
+        elif self.pool == ClinicalPool.symptomatic:
             pool_inds = np.nonzero(people.symptomatic)[0]
-        else:  # 'diagnosed'
+        else:  # ClinicalPool.diagnosed
             pool_inds = np.nonzero(people.diagnosed)[0]
 
         if len(pool_inds) == 0:
@@ -168,7 +187,7 @@ class ClinicalSequencer(Analyzer):
         if len(pool_inds) < n:
             warnings.warn(
                 f"ClinicalSequencer day {sim.t}: requested {n} samples but only "
-                f"{len(pool_inds)} agents are available in pool='{self.pool}'. "
+                f"{len(pool_inds)} agents are available in pool='{self.pool.value}'. "
                 f"Returning all {len(pool_inds)} agents."
             )
             sampled_inds = pool_inds
