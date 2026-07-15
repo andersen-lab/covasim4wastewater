@@ -52,14 +52,15 @@ def _decode_mutations(mutations, reference):
 @dataclasses.dataclass
 class WastewaterSample:
     '''Snapshot of circulating haplotypes and their viral-shedding-weighted proportions.'''
-    day:            int
-    date:           str
-    mutation_sets:  list  # deduplicated frozensets of (site_0idx, ref_nt_int, alt_nt_int), one per distinct haplotype
-    variant_labels: list  # variant label string for each distinct haplotype
-    proportions:    list  # normalized viral-shedding fractions, sums to 1.0
-    raw_loads:      list  # un-normalized total viral shedding per haplotype
-    n_infectious:   int   # number of currently infectious agents
-    n_genotypes:    int   # number of distinct haplotypes present
+    day:              int
+    date:             str
+    mutation_sets:    list  # deduplicated frozensets of (site_0idx, ref_nt_int, alt_nt_int), one per distinct haplotype
+    variant_labels:   list  # variant label string for each distinct haplotype
+    proportions:      list  # normalized viral-shedding fractions, sums to 1.0
+    raw_loads:        list  # un-normalized total viral shedding per haplotype
+    n_infectious:     int   # number of currently infectious agents
+    n_genotypes:      int   # number of distinct haplotypes present
+    variant_shedding: dict = None  # {variant_label: total_shedding} aggregated by named variant
 
 
 class WastewaterSampler(Analyzer):
@@ -149,15 +150,23 @@ class WastewaterSampler(Analyzer):
         proportions   = [v / total for v in raw_loads]
         proportions[-1] = 1.0 - sum(proportions[:-1])
 
+        # Aggregate shedding by named variant (mirrors old group_by='variant' logic)
+        variant_indices = sim.people.infectious_variant[inds]
+        load_by_variant = defaultdict(float)
+        for vi, load in zip(variant_indices, loads):
+            vname = variant_map.get(int(vi), f'variant_{int(vi)}')
+            load_by_variant[vname] += float(load)
+
         self.samples[sim.t] = WastewaterSample(
-            day            = sim.t,
-            date           = sim.date(sim.t),
-            mutation_sets  = mutation_sets,
-            variant_labels = [label_by_muts[m] for m in mutation_sets],
-            proportions    = proportions,
-            raw_loads      = raw_loads,
-            n_infectious   = int(len(inds)),
-            n_genotypes    = len(mutation_sets),
+            day              = sim.t,
+            date             = sim.date(sim.t),
+            mutation_sets    = mutation_sets,
+            variant_labels   = [label_by_muts[m] for m in mutation_sets],
+            proportions      = proportions,
+            raw_loads        = raw_loads,
+            n_infectious     = int(len(inds)),
+            n_genotypes      = len(mutation_sets),
+            variant_shedding = dict(load_by_variant),
         )
 
     def to_fasta(self, day):
