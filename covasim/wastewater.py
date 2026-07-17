@@ -182,75 +182,85 @@ class WastewaterSampler(Analyzer):
         return '\n'.join(lines)
 
     def simulate_sample(self, day, primers, reference, outdir='./reads/', readcnt=500, redo=False, **bygul_kwargs):
-        '''
-        Write per-haplotype FASTA files and invoke Bygul's simulate_proportions CLI.
+            '''
+            Write a multi-FASTA file and a proportions CSV, then invoke Bygul's simulate_proportions CLI.
 
-        Bygul's simulate_proportions command is a Click CLI that expects genome
-        sequences as on-disk FASTA files. This method writes temporary FASTA files,
-        builds the required CLI argument list, and calls the command via Click's
-        standalone_mode=False interface.
+            Bygul's simulate_proportions command is a Click CLI that expects genome
+            sequences inside a multi-FASTA file and their relative abundances in a CSV.
+            This method writes temporary files, builds the required CLI argument list, 
+            and calls the command via Click's standalone_mode=False interface.
 
-        Args:
-            day       (int):  simulation day to sample (must be in self.samples)
-            primers   (str):  path to primer BED file (required by Bygul)
-            reference (str):  path to reference FASTA file (required by Bygul)
-            outdir    (str):  output directory for Bygul reads (default '.') (NOTE: If redo=True, Bygul will delete all contents of outdir)
-            readcnt   (int):  number of reads per amplicon (default 500)
-            redo      (bool): re-run even if output files already exist (default False)
-            **bygul_kwargs:   additional CLI options forwarded as --key value pairs
-                              (e.g. wgsim_read_length=150, wgsim_error_rate=0.0001,
-                               simulation_mode='amplicon', seed=42)
+            Args:
+                day       (int):  simulation day to sample (must be in self.samples)
+                primers   (str):  path to primer BED file (required by Bygul)
+                reference (str):  path to reference FASTA file (required by Bygul)
+                outdir    (str):  output directory for Bygul reads (default '.') (NOTE: If redo=True, Bygul will delete all contents of outdir)
+                readcnt   (int):  number of reads per amplicon (default 500)
+                redo      (bool): re-run even if output files already exist (default False)
+                **bygul_kwargs:   additional CLI options forwarded as --key value pairs
+                                (e.g. wgsim_read_length=150, wgsim_error_rate=0.0001,
+                                simulation_mode='amplicon', seed=42)
 
-        Requires the `bygul` package to be installed.
-        '''
-        import os
-        import tempfile
+            Requires the `bygul` package to be installed.
+            '''
+            import os
+            import tempfile
+            import csv
 
-        try:
-            from bygul._cli import simulate_proportions
-        except ImportError as e:
-            raise ImportError(
-                "The 'bygul' package is required for WastewaterSampler.simulate(). "
-                "Install it from the Andersen Lab: https://github.com/andersen-lab/Bygul"
-            ) from e
+            try:
+                from bygul._cli import simulate_proportions
+            except ImportError as e:
+                raise ImportError(
+                    "The 'bygul' package is required for WastewaterSampler.simulate(). "
+                    "Install it from the Andersen Lab: https://github.com/andersen-lab/Bygul"
+                ) from e
 
-        sample = self.samples[day]
-        if sample is None:
-            raise ValueError(f"No infectious agents were present on day {day}; cannot simulate.")
+            sample = self.samples[day]
+            if sample is None:
+                raise ValueError(f"No infectious agents were present on day {day}; cannot simulate.")
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Write each unique haplotype to its own FASTA file
-            ref         = self._reference
-            fasta_paths = []
-            for i, muts in enumerate(sample.mutation_sets):
-                path = os.path.join(tmpdir, f'genotype_{i}.fasta')
-                with open(path, 'w') as fh:
-                    fh.write(f'>genotype_{i}\n{_decode_mutations(muts, ref)}\n')
-                fasta_paths.append(path)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                multifasta_path = os.path.join(tmpdir, f'wastewater_day{day}.fasta')
+                csv_path = os.path.join(tmpdir, 'proportions.csv')
 
-            genomes_str = ','.join(fasta_paths)
+                ref = self._reference
 
-            # Build proportions string that sums to exactly 1.0 after float parsing.
-            # Adjust the last value to absorb any rounding error.
-            props = sample.proportions
-            rounded = [round(p, 10) for p in props[:-1]]
-            rounded.append(round(1.0 - sum(rounded), 10))
-            proportions_str = ','.join(str(p) for p in rounded)
+                # Build proportions list that sums to exactly 1.0 after float parsing.
+                # Adjust the last value to absorb any rounding error.
+                props = sample.proportions
+                rounded = [round(p, 10) for p in props[:-1]]
+                rounded.append(round(1.0 - sum(rounded), 10))
 
-            # Build Click CLI args list (genomes positional first, then options)
-            args = [genomes_str,
+                # Write both the multi-FASTA and the proportions CSV
+                with open(multifasta_path, 'w') as f_fasta, open(csv_path, 'w', newline='') as f_csv:
+                    csv_writer = csv.writer(f_csv)
+                    csv_writer.writerow(['sample_name', 'proportion'])
+
+                    for i, muts in enumerate(sample.mutation_sets):
+                        seq_name = f'genotype_{i}'
+                        seq = _decode_mutations(muts, ref)
+                        
+                        # Append sequence to the multi-FASTA
+                        f_fasta.write(f'>{seq_name}\n{seq}\n')
+                        
+                        # Write row to the CSV mapping name to proportion
+                        csv_writer.writerow([seq_name, rounded[i]])
+
+                # Build Click CLI args list using the new --multifasta and --csv parameters
+                args = [
+                    '--multifasta', multifasta_path,
+                    '--csv', csv_path,
                     '--primers', primers,
                     '--reference', reference,
-                    '--proportions', proportions_str,
                     '--outdir', outdir,
                     '--readcnt', str(readcnt),
-                    ]
+                ]
 
-            for key, val in bygul_kwargs.items():
-                args.extend([f'--{key}', str(val)])
+                for key, val in bygul_kwargs.items():
+                    args.extend([f'--{key}', str(val)])
 
-            if redo:
-                args.extend(['--redo'])
+                if redo:
+                    args.extend(['--redo'])
 
-            # standalone_mode=False returns the result instead of calling sys.exit
-            simulate_proportions.main(args=args, standalone_mode=False)
+                # standalone_mode=False returns the result instead of calling sys.exit
+                simulate_proportions.main(args=args, standalone_mode=False)
