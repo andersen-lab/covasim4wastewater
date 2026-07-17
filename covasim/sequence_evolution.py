@@ -101,10 +101,6 @@ def extract_founding_mutations(fasta_path, reference):
     seq_str = ''.join(seq_lines)
 
     if len(seq_str) != len(reference):
-        warnings.warn(
-            f'founding_fasta "{fasta_path}" length ({len(seq_str)}) differs from '
-            f'reference ({len(reference)}); aligning with biopython (indels ignored).'
-        )
         ref_str = ''.join(_INT_TO_NT[int(b)] for b in reference)
         aligned_ref, aligned_query = _align_to_reference(seq_str, ref_str)
         mutations = set()
