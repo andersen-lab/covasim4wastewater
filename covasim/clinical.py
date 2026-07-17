@@ -12,6 +12,7 @@ where a sample of positive tests is sent for whole-genome sequencing each day.
 Requires pars['evo_pars']['enable'] = True.
 '''
 
+import collections
 import dataclasses
 import enum
 import warnings
@@ -97,8 +98,22 @@ class ClinicalSequencer(Analyzer):
          full ACGT strings on demand.
       4. Stores one ``ClinicalSample`` per agent in ``self.samples[day]``.
 
-    Samples are stored in self.samples (dict: int day → list[ClinicalSample]),
-    one ``ClinicalSample`` per sequenced agent.
+    Specimens collected on a sampling day are not necessarily released the
+    same day: they first enter a FIFO pending queue, and are only released
+    (moved into ``self.samples``) once the queue holds at least
+    ``sequencing_batch_size`` specimens.  This models real-world sequencing
+    runs, where samples are batched to fill a flow cell before being
+    processed.  With the default ``sequencing_batch_size=1``, every
+    specimen is released immediately on the day it is collected (the
+    original, unbatched behavior).
+
+    Samples are stored in self.samples (dict: int release_day → list[ClinicalSample]),
+    one ``ClinicalSample`` per sequenced agent.  Each ``ClinicalSample.day``
+    still reflects the day the specimen was *collected*, which may differ
+    from the release day it appears under in ``self.samples`` once batching
+    is enabled.  Specimens still awaiting release live in ``self._pending``
+    (a FIFO queue); ``self.n_pending`` reports its length. Any specimens
+    still pending when the sim ends are never released.
     Use to_fasta(day) to get a multi-FASTA string suitable for downstream
     analysis or comparison with wastewater reads.
 
@@ -120,6 +135,10 @@ class ClinicalSequencer(Analyzer):
                                  ``ClinicalPool.symptomatic`` — infectious agents who
                                  are also currently symptomatic.  Equivalent string
                                  values are also accepted.
+        sequencing_batch_size (int): Number of specimens that must accumulate in
+                                 the pending queue before a batch is released
+                                 (default 1 = release immediately on collection).
+                                 Must be a positive integer.
         label     (str):         Optional label for the analyzer.
 
     Example::
@@ -131,14 +150,25 @@ class ClinicalSequencer(Analyzer):
         print(cs.to_fasta(56))
     '''
 
-    def __init__(self, days, n_samples=None, pool='diagnosed', label=None):
+    def __init__(self, days, n_samples=None, pool='diagnosed', sequencing_batch_size=1, label=None):
         super().__init__(label=label)
-        self._days_input = days
-        self._n_samples  = n_samples
-        self.pool        = _coerce_pool(pool)
-        self.samples     = {}
-        self._reference  = None  # set in initialize()
-        self._rng        = None  # set in initialize()
+        if not isinstance(sequencing_batch_size, (int, np.integer)) or sequencing_batch_size < 1:
+            raise ValueError(
+                f'sequencing_batch_size must be a positive integer, got {sequencing_batch_size}'
+            )
+        self._days_input          = days
+        self._n_samples            = n_samples
+        self.pool                  = _coerce_pool(pool)
+        self.sequencing_batch_size = int(sequencing_batch_size)
+        self.samples               = {}
+        self._pending              = collections.deque()  # FIFO queue of collected-but-unreleased ClinicalSamples
+        self._reference            = None  # set in initialize()
+        self._rng                  = None  # set in initialize()
+
+    @property
+    def n_pending(self):
+        '''Number of collected specimens awaiting release in the batch queue.'''
+        return len(self._pending)
 
     def initialize(self, sim):
         super().initialize(sim)
@@ -183,7 +213,6 @@ class ClinicalSequencer(Analyzer):
             pool_inds = np.nonzero(people.diagnosed)[0]
 
         if len(pool_inds) == 0:
-            self.samples[sim.t] = []
             return
 
         if len(pool_inds) < n:
@@ -212,7 +241,14 @@ class ClinicalSequencer(Analyzer):
                 variant_label = label,
             ))
 
-        self.samples[sim.t] = day_samples
+        self._pending.extend(day_samples)
+        self._release_batches(sim.t)
+
+    def _release_batches(self, release_day):
+        '''Move complete batches from the pending FIFO queue into self.samples.'''
+        while len(self._pending) >= self.sequencing_batch_size:
+            batch = [self._pending.popleft() for _ in range(self.sequencing_batch_size)]
+            self.samples.setdefault(release_day, []).extend(batch)
 
     def to_fasta(self, day):
         '''Return a multi-FASTA string, one record per sampled agent, for the given day.'''
@@ -223,7 +259,7 @@ class ClinicalSequencer(Analyzer):
         lines = []
         for s in day_samples:
             lines.append(
-                f'>agent_{s.agent_id}  day={day}  date={s.date}  variant={s.variant_label}'
+                f'>agent_{s.agent_id}  day={s.day}  date={s.date}  variant={s.variant_label}'
             )
             lines.append(_decode_mutations(s.mutations, ref))
         return '\n'.join(lines)
