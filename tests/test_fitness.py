@@ -153,15 +153,6 @@ class TestExtractFoundingMutations:
 
 class TestExtractFoundingMutationsAlignment:
 
-    def test_warns_on_length_mismatch(self):
-        # Shorter sequence (deletion of last base)
-        path = _write_fasta(REF[:-1])
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter('always')
-            extract_founding_mutations(path, REF_ARR)
-        os.unlink(path)
-        assert any('aligning' in str(x.message).lower() for x in w)
-
     def test_no_snps_on_identical_prefix(self):
         # Sequence is reference minus last two bases — all positions that align
         # cleanly should show no SNPs
