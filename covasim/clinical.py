@@ -20,7 +20,8 @@ import warnings
 import numpy as np
 
 from .analysis import Analyzer
-from .sequence_evolution import decode_sequence
+from .sequence_evolution import agent_mutations as _agent_mutations
+from .sequence_evolution import decode_mutations as _decode_mutations
 
 __all__ = ['ClinicalPool', 'ClinicalSequencer', 'ClinicalSample']
 
@@ -43,32 +44,6 @@ def _coerce_pool(pool):
             valid = [p.value for p in ClinicalPool]
             raise ValueError(f"pool must be one of {valid}, got '{pool}'")
     raise TypeError(f"pool must be a ClinicalPool or str, got {type(pool)}")
-
-
-def _agent_mutations(tracker, agent_idx, reference):
-    '''
-    Return the mutation frozenset for agent_idx.
-
-    Prefers tracker.agent_mutations (populated when fitness tracking is active).
-    Falls back to diffing _episode_roots against the reference when the key is
-    absent — O(L) but only called on sampling days.
-    '''
-    if agent_idx in tracker.agent_mutations:
-        return tracker.agent_mutations[agent_idx]
-    root = tracker._episode_roots.get(agent_idx, reference)
-    return frozenset(
-        (j, int(reference[j]), int(root[j]))
-        for j in range(len(reference))
-        if root[j] != reference[j]
-    )
-
-
-def _decode_mutations(mutations, reference):
-    '''Reconstruct an ACGT string from a mutation frozenset and reference uint8 array.'''
-    seq = reference.copy()
-    for site, _ref_nt, alt_nt in mutations:
-        seq[site] = alt_nt
-    return decode_sequence(seq)
 
 
 @dataclasses.dataclass
