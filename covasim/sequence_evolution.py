@@ -16,7 +16,8 @@ import numpy as np
 from abc import ABC, abstractmethod
 
 __all__ = ['SubstitutionModel', 'JukesCantor', 'LineageSequenceTracker',
-           'encode_sequence', 'decode_sequence', 'extract_founding_mutations']
+           'encode_sequence', 'decode_sequence', 'extract_founding_mutations',
+           'agent_mutations', 'decode_mutations']
 
 _NT_TO_INT = {'A': 0, 'C': 1, 'G': 2, 'T': 3,
               'a': 0, 'c': 1, 'g': 2, 't': 3}
@@ -101,10 +102,6 @@ def extract_founding_mutations(fasta_path, reference):
     seq_str = ''.join(seq_lines)
 
     if len(seq_str) != len(reference):
-        warnings.warn(
-            f'founding_fasta "{fasta_path}" length ({len(seq_str)}) differs from '
-            f'reference ({len(reference)}); aligning with biopython (indels ignored).'
-        )
         ref_str = ''.join(_INT_TO_NT[int(b)] for b in reference)
         aligned_ref, aligned_query = _align_to_reference(seq_str, ref_str)
         mutations = set()
@@ -164,6 +161,38 @@ def _apply_branch_mutations(parent_muts, branch_mutations, reference):
         else:
             current[site] = to_child  # new or updated mutation
     return frozenset((site, int(reference[site]), to_nt) for site, to_nt in current.items())
+
+
+def agent_mutations(tracker, agent_idx, reference):
+    '''
+    Return the mutation frozenset for agent_idx.
+
+    Prefers tracker.agent_mutations (populated when fitness tracking is active).
+    Falls back to diffing _episode_roots against the reference when the key is
+    absent — O(L) but only called on sampling days.
+
+    Shared by ClinicalSequencer and WastewaterSampler.
+    '''
+    if agent_idx in tracker.agent_mutations:
+        return tracker.agent_mutations[agent_idx]
+    root = tracker._episode_roots.get(agent_idx, reference)
+    return frozenset(
+        (j, int(reference[j]), int(root[j]))
+        for j in range(len(reference))
+        if root[j] != reference[j]
+    )
+
+
+def decode_mutations(mutations, reference):
+    '''
+    Reconstruct an ACGT string from a mutation frozenset and reference uint8 array.
+
+    Shared by ClinicalSequencer and WastewaterSampler.
+    '''
+    seq = reference.copy()
+    for site, _ref_nt, alt_nt in mutations:
+        seq[site] = alt_nt
+    return decode_sequence(seq)
 
 
 class SubstitutionModel(ABC):
