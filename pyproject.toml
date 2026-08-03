@@ -67,6 +67,7 @@ docs = [
     "optuna",
     "seaborn",
     "pandoc",
+    "shedding-hub"
 ]
 dev = ["covasim[test,docs]"]
 
