@@ -19,6 +19,7 @@ from . import analysis as cva
 from . import sequence_evolution as cvseq
 from . import fitness as cvfit
 from .settings import options as cvo
+import shedding_hub as sh
 
 # Almost everything in this file is contained in the Sim class
 __all__ = ['Sim', 'diff_sims', 'demo', 'AlreadyRunError']
