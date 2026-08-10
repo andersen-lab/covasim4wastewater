@@ -13,7 +13,7 @@ import random # Used only for resetting the seed
 import sciris as sc # For additional utilities
 from .settings import options as cvo # To set options
 from . import defaults as cvd # To set default types
-
+import shedding_hub as sh
 
 # What functions are externally visible -- note, this gets populated in each section below
 __all__ = []
@@ -82,6 +82,31 @@ def compute_viral_load(t,     time_start, time_recovered, time_dead,  frac_time,
     load[invalid] = 0
 
     return load
+
+
+@nb.njit(
+    (nbint, nbfloat[:], nbfloat[:], nbfloat[:]),
+    cache=cache,
+    parallel=safe_parallel,
+)
+def compute_viral_shedding(
+    date_infectious,
+    n_days
+):
+    """
+    Calculate viral shedding for every individual at timestep t.
+
+    Args:
+        date_infectious: (float[]) Individuals' infectious dates.
+        n_days: (int) Number of days to simulate.
+
+    Returns:
+        shedding (float[]): Viral shedding for each individual.
+    """
+    catalog = sh.load_shedding_catalog()
+    source = sh.shedding_for('SARS-CoV-2', 'stool', catalog=catalog)
+    viral_shedding = sh.simulate_shedding(source, n_indiduals = 1, times = np.arange(date_infectious[0],n_days))
+    return viral_shedding
 
 
 @nb.njit(            (nbfloat[:], nbfloat[:], nbbool[:], nbbool[:], nbfloat,    nbfloat[:], nbbool[:], nbbool[:], nbbool[:], nbfloat,      nbfloat,    nbfloat,     nbfloat[:]), cache=cache, parallel=safe_parallel)
