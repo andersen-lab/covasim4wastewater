@@ -330,7 +330,8 @@ class Sim(cvb.BaseSim):
         self.results['pop_protection']      = init_res('Population immunity protection', scale=False, color=dcols.pop_protection)
         self.results['pop_symp_protection'] = init_res('Population symptomatic protection', scale=False, color=dcols.pop_symp_protection)
         self.results['viral_load_hist'] = np.zeros((self['pop_size'], self.npts),dtype=cvd.default_float,)
-        self.results['viral_shedding_hist'] = np.zeros((self['pop_size'], self.npts),dtype=cvd.default_float,)
+        self.results['viral_shedding_hist'] = np.zeros((self['pop_size'], self.npts), dtype=cvd.default_float,)
+        self.compute_viral_shedding_lookup()
         # Handle variants
         nv = self['n_variants']
         self.results['variant'] = {}
