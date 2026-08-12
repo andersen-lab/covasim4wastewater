@@ -872,6 +872,7 @@ class Sim(cvb.BaseSim):
         self.compute_doubling()
         self.compute_r_eff()
         self.compute_summary()
+        self.compute_viral_shedding_lookup()
         return
 
 
@@ -896,7 +897,40 @@ class Sim(cvb.BaseSim):
 
         self.results['variant']['incidence_by_variant'][:] = np.einsum('ji,i->ji',res['variant']['new_infections_by_variant'][:], 1/res['n_susceptible'][:]) # Calculate the incidence
         self.results['variant']['prevalence_by_variant'][:] = np.einsum('ji,i->ji',res['variant']['new_infections_by_variant'][:], 1/res['n_alive'][:])  # Calculate the prevalence
+        return
 
+
+    def compute_viral_shedding_lookup(self):
+        catalog = sh.load_shedding_catalog()
+        source = sh.shedding_for('SARS-CoV-2', 'stool', catalog=catalog)
+
+        n_days = self.pars['n_days']
+        n_individuals = self['pop_size']
+
+        # 1. Run simulation ONCE
+        shedding_df = sh.simulate_shedding(
+            source, 
+            n_individuals=n_individuals, 
+            times=np.arange(1, n_days + 1),
+        )
+        # Force integer types on time and individual_id to prevent pivot misalignment
+        shedding_df['time'] = shedding_df['time'].astype(int)
+        shedding_df['individual_id'] = shedding_df['individual_id'].astype(int)
+        # 2. Pivot the EXACT same DataFrame
+        pivoted_df = shedding_df.pivot(
+            index='individual_id', 
+            columns='time', 
+            values='log10_value'
+        )
+        # 3. Reindex to guarantee complete mapping for all individuals and days
+        # Column 1 in pivoted_df -> Index 0 in NumPy array
+        all_individuals = np.arange(n_individuals)
+        all_times = np.arange(1, n_days + 1)
+        
+        pivoted_df = pivoted_df.reindex(index=all_individuals, columns=all_times)
+
+        # 4. Store in lookup array
+        self.shedding_lookup = pivoted_df.fillna(0.0).to_numpy()
         return
 
 
