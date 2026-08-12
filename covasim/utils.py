@@ -84,28 +84,30 @@ def compute_viral_load(t,     time_start, time_recovered, time_dead,  frac_time,
     return load
 
 
-@nb.njit(
-    (nbint, nbfloat[:], nbfloat[:], nbfloat[:]),
-    cache=cache,
-    parallel=safe_parallel,
-)
-def compute_viral_shedding(
-    date_infectious,
-    n_days
-):
-    """
-    Calculate viral shedding for every individual at timestep t.
+def compute_viral_shedding(t, date_infectious, shedding_lookup):
+    n_individuals = len(date_infectious)
+    viral_shedding = np.zeros(n_individuals, dtype=float)
 
-    Args:
-        date_infectious: (float[]) Individuals' infectious dates.
-        n_days: (int) Number of days to simulate.
+    inf_day = np.array(date_infectious)
 
-    Returns:
-        shedding (float[]): Viral shedding for each individual.
-    """
-    catalog = sh.load_shedding_catalog()
-    source = sh.shedding_for('SARS-CoV-2', 'stool', catalog=catalog)
-    viral_shedding = sh.simulate_shedding(source, n_indiduals = 1, times = np.arange(date_infectious[0],n_days))
+    t_rel = (t - inf_day)  
+
+    # Mask for individuals infecsted on or before current timestep t
+    active_mask = ~np.isnan(inf_day) & (t >= inf_day)
+
+    if not np.any(active_mask):
+        return viral_shedding
+
+    active_indices = np.where(active_mask)[0]
+    t_rel_active = t_rel[active_indices].astype(int)
+
+    # Bound relative days to maximum array columns
+    max_days = shedding_lookup.shape[1] - 1
+    t_rel_active = np.clip(t_rel_active, 0, max_days)
+
+    # Direct array indexing
+    viral_shedding[active_indices] = shedding_lookup[active_indices, t_rel_active]
+
     return viral_shedding
 
 
