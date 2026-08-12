@@ -920,7 +920,7 @@ class Sim(cvb.BaseSim):
         pivoted_df = shedding_df.pivot(
             index='individual_id', 
             columns='time', 
-            values='log10_value'
+            values='value'
         )
         # 3. Reindex to guarantee complete mapping for all individuals and days
         # Column 1 in pivoted_df -> Index 0 in NumPy array
