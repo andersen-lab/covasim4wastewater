@@ -901,6 +901,15 @@ class Sim(cvb.BaseSim):
 
 
     def compute_viral_shedding_lookup(self):
+        n_individuals = self['pop_size']
+        n_days = self.pars['n_days']
+
+        # Handle zero population size ---
+        if n_individuals <= 0:
+            # Pre-allocate an empty matrix with 0 rows and return early
+            self.shedding_lookup = np.empty((0, n_days), dtype=float)
+            return
+
         catalog = sh.load_shedding_catalog()
         source = sh.shedding_for('SARS-CoV-2', 'stool', catalog=catalog)
 
