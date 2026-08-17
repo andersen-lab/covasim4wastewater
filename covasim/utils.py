@@ -84,7 +84,7 @@ def compute_viral_load(t,     time_start, time_recovered, time_dead,  frac_time,
     return load
 
 
-def compute_viral_shedding(t, date_infectious, shedding_lookup):
+def compute_viral_shedding_sh(t, date_infectious, shedding_lookup):
     n_individuals = len(date_infectious)
     viral_shedding = np.zeros(n_individuals, dtype=float)
 
@@ -109,6 +109,74 @@ def compute_viral_shedding(t, date_infectious, shedding_lookup):
     viral_shedding[active_indices] = shedding_lookup[active_indices, t_rel_active]
 
     return viral_shedding
+
+def compute_wastewater_shedding(t, people, viral_load, pars=None):
+    '''Compute per-agent wastewater shedding independently of transmission.'''
+    pars = pars or {}
+    model = pars.get('shedding_model', 'viral_load')
+    if model == 'shedding_hub':
+        shedding_lookup = pars.get('shedding_lookup')
+        date_infectious = pars.get('date_infectious')
+        return compute_viral_shedding_sh(t, date_infectious, shedding_lookup)
+
+    if callable(model):
+        shedding = np.asarray(
+            model(t=t, people=people, viral_load=viral_load, pars=pars),
+            dtype=cvd.default_float,
+        )
+        if shedding.shape != viral_load.shape:
+            raise ValueError('Custom wastewater shedding model must return one value per agent')
+        if np.any(shedding < 0):
+            raise ValueError('Custom wastewater shedding model returned negative values')
+        return shedding
+
+    max_multiplier = pars.get('max_individual_multiplier')
+    pathogen_scale = pars.get('pathogen_scale', 1.0)
+    multipliers = np.asarray(people.rel_trans, dtype=cvd.default_float).copy()
+    multipliers[np.isnan(multipliers)] = 1.0
+    multipliers[multipliers < 0] = 0.0
+    if max_multiplier is not None:
+        max_multiplier = float(max_multiplier)
+        if max_multiplier <= 0:
+            raise ValueError('max_individual_multiplier must be greater than zero')
+        multipliers = np.minimum(multipliers, max_multiplier)
+
+    if model == 'viral_load':
+        base = np.asarray(viral_load, dtype=cvd.default_float)
+
+    elif model == 'gamma':
+        shape = float(pars.get('gamma_shape', 2.0))
+        scale = float(pars.get('gamma_scale',3.0))
+        duration = float(pars.get('duration', 21.0))
+        if shape <= 0 or scale <= 0 or duration <= 0:
+            raise ValueError('gamma_shape, gamma_scale, and duration must be greater than zero')
+
+        days_since_infectious = t - people.date_infectious
+        x = np.maximum(days_since_infectious + 1.0, 0.0)
+        base = np.zeros(len(people), dtype=cvd.default_float)
+        active = (
+            people.infectious
+            & ~np.isnan(people.date_infectious)
+            & (days_since_infectious >= 0)
+            & (days_since_infectious < duration)
+        )
+        if np.any(active):
+            xa = x[active]
+            raw = np.power(xa, shape - 1.0) * np.exp(-xa / scale)
+            if shape > 1.0:
+                peak_x = (shape - 1.0) * scale
+                peak = np.power(peak_x, shape - 1.0) * np.exp(-peak_x / scale)
+            else:
+                peak = 1.0
+            base[active] = raw / max(peak, np.finfo(float).tiny)
+
+    else:
+        raise ValueError(
+            f'Unknown wastewater shedding_model {model!r}; '
+            "use 'viral_load', 'gamma', or a callable"
+        )
+
+    return np.asarray(base * multipliers, dtype=cvd.default_float) * pathogen_scale
 
 
 @nb.njit(            (nbfloat[:], nbfloat[:], nbbool[:], nbbool[:], nbfloat,    nbfloat[:], nbbool[:], nbbool[:], nbbool[:], nbfloat,      nbfloat,    nbfloat,     nbfloat[:]), cache=cache, parallel=safe_parallel)
@@ -182,7 +250,7 @@ def find_contacts(p1, p2, inds): # pragma: no cover
 
 #%% Sampling and seed methods
 
-__all__ += ['sample', 'get_pdf', 'set_seed']
+__all__ += ['compute_wastewater_shedding', 'sample', 'get_pdf', 'set_seed']
 
 
 def sample(dist=None, par1=None, par2=None, size=None, **kwargs):

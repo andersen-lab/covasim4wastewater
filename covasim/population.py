@@ -16,9 +16,50 @@ from . import people as cvppl
 
 
 # Specify all externally visible functions this file defines
-__all__ = ['make_people', 'make_randpop', 'make_random_contacts',
+__all__ = ['make_people', 'make_randpop', 'assign_regions', 'make_random_contacts',
            'make_microstructured_contacts', 'make_hybrid_contacts',
            'make_synthpop']
+
+
+def assign_regions(pars):
+    '''Assign each agent to a configurable region or sewershed.'''
+    pop_size = int(pars['pop_size'])
+    try:
+        region_pars = pars['region_pars'] or {}
+    except (KeyError, TypeError):
+        region_pars = {}
+
+    if not region_pars.get('enable', False):
+        return np.zeros(pop_size, dtype=cvd.default_int)
+
+    assignments = region_pars.get('assignments')
+    if assignments is not None:
+        regions = np.asarray(assignments, dtype=cvd.default_int)
+        if len(regions) != pop_size:
+            raise ValueError(
+                f'region_pars["assignments"] has length {len(regions)}, '
+                f'but pop_size is {pop_size}'
+            )
+        return regions
+
+    labels = np.asarray(region_pars.get('labels', [1]), dtype=cvd.default_int)
+    probabilities = np.asarray(
+        region_pars.get('probabilities', np.ones(len(labels))),
+        dtype=float,
+    )
+
+    if not len(labels):
+        raise ValueError('region_pars["labels"] must contain at least one region')
+    if len(labels) != len(probabilities):
+        raise ValueError('region labels and probabilities must have the same length')
+    if len(np.unique(labels)) != len(labels):
+        raise ValueError('region labels must be unique')
+    if np.any(probabilities < 0) or probabilities.sum() <= 0:
+        raise ValueError('region probabilities must be non-negative and sum to more than zero')
+
+    # Normalize probabilities to sum to 1
+    probabilities = probabilities / probabilities.sum()
+    return np.random.choice(labels, size=pop_size, p=probabilities).astype(cvd.default_int)
 
 
 def make_people(sim, popdict=None, die=True, reset=False, recreate=False, verbose=None, **kwargs):
@@ -82,6 +123,10 @@ def make_people(sim, popdict=None, die=True, reset=False, recreate=False, verbos
             else: # pragma: no cover
                 errormsg = f'Population type "{pop_type}" not found; choices are random, hybrid, or synthpops'
                 raise ValueError(errormsg)
+
+    # Ensure every population has a region field, including older saved popdicts
+    if not isinstance(popdict, cvppl.People) and 'region' not in popdict:
+        popdict['region'] = assign_regions(sim.pars)
 
     # Ensure prognoses are set
     if sim['prognoses'] is None:
@@ -202,10 +247,7 @@ def make_randpop(pars, use_age_data=True, use_household_data=True, sex_ratio=0.5
     age_data_prob /= age_data_prob.sum() # Ensure it sums to 1
     age_bins       = cvu.n_multinomial(age_data_prob, pop_size) # Choose age bins
     ages           = age_data_min[age_bins] + age_data_range[age_bins]*np.random.random(pop_size) # Uniformly distribute within this age bin
-    possible_regions = ['1', '2', '3', '4']
-    # Weighted choice: 50% 1, 20% 2, 20% 3, 10% 4
-    probabilities = [0.5, 0.2, 0.2, 0.1]
-    regions = np.random.choice(possible_regions, size=pop_size, p=probabilities)
+    regions = assign_regions(pars)
     # Store output
     popdict = {}
     popdict['uid'] = uids

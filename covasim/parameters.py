@@ -36,6 +36,25 @@ def make_pars(set_prognoses=False, prog_by_age=True, version=None, **kwargs):
     pars['pop_type']     = 'random' # What type of population data to use -- 'random' (fastest), 'synthpops' (best), 'hybrid' (compromise)
     pars['location']     = None     # What location to load data from -- default Seattle
 
+    # Spatial parameters 
+    pars['region_pars'] = dict(
+        enable=True,
+        labels=[1, 2, 3, 4],
+        probabilities=[0.5, 0.2, 0.2, 0.1],
+        assignments=None,                # Optional length-pop_size array
+        cross_region_contact_factor=1.0, # 1=no spatial effect; 0=no cross-region transmission
+    )
+
+    # Wastewater parameters
+    pars['wastewater_pars'] = dict(
+        shedding_model='viral_load',     # 'viral_load', 'gamma', or a callable
+        gamma_shape=2.0,                 # Used only by the optional gamma model
+        gamma_scale=3.0,
+        duration=21.0,
+        max_individual_multiplier=None,  # Set a number to limit extreme "super-shedders"
+        pathogen_scale=1.0,              # Multiply the final calculated viral load
+    )
+
     # Simulation parameters
     pars['start_day']  = '2020-03-01' # Start day of the simulation
     pars['end_day']    = None         # End day of the simulation
