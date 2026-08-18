@@ -1,17 +1,18 @@
 '''
 Wastewater sampling analyzer for Covasim.
 
-WastewaterSampler snapshots circulating viral haplotypes and their relative
-proportions weighted by individual wastewater shedding. It can return a pooled
-sample and optional region/sewershed-specific samples.
+WastewaterSampler is a cv.Analyzer that, at specified time points, snapshots
+the set of circulating viral haplotypes and their relative proportions weighted
+by individual viral shedding — i.e. what a wastewater sample would look like.
+Haplotypes are stored as frozensets of (site_0indexed, ref_nt_int, alt_nt_int)
+mutation tuples relative to the simulation reference sequence.
+Snapshots can be exported as FASTA or fed directly to Bygul's
+simulate_proportions to generate synthetic sequencing reads.
 
 Requires pars['evo_pars']['enable'] = True.
 '''
 
-import csv
 import dataclasses
-import os
-import tempfile
 from collections import defaultdict
 
 import numpy as np
@@ -25,42 +26,63 @@ __all__ = ['WastewaterSampler', 'WastewaterSample']
 
 @dataclasses.dataclass
 class WastewaterSample:
-    '''Snapshot of a viral haplotype mixture in wastewater.'''
-    day: int
-    date: str
-    mutation_sets: list
-    variant_labels: list
-    proportions: list
-    raw_loads: list
-    n_infectious: int
-    n_genotypes: int
-    variant_shedding: dict = None
-    region: int = None
-    total_load: float = 0.0
+    '''Snapshot of circulating haplotypes and their viral-shedding-weighted proportions.'''
+    day:              int
+    date:             str
+    mutation_sets:    list  # deduplicated frozensets of (site_0idx, ref_nt_int, alt_nt_int), one per distinct haplotype
+    variant_labels:   list  # variant label string for each distinct haplotype
+    proportions:      list  # normalized viral-shedding fractions, sums to 1.0
+    raw_loads:        list  # un-normalized total viral shedding per haplotype
+    n_infectious:     int   # number of currently infectious agents
+    n_genotypes:      int   # number of distinct haplotypes present
+    variant_shedding: dict = None  # {variant_label: total_shedding} aggregated by named variant
+    region:           int = None
+    total_load:       float = 0.0
 
 
 class WastewaterSampler(Analyzer):
     '''
-    Snapshot pooled and optional region-specific wastewater mixtures.
+    Analyzer that snapshots the viral haplotype mixture present in a wastewater
+    sample at one or more time points.
+
+    For each sampled day:
+      1. Identifies all currently infectious agents.
+      2. Reads each agent's viral shedding from ``sim.people.viral_shedding``
+         (``viral_load × rel_trans``), which is updated by ``sim.step()`` before
+         analyzers are called.
+      3. Retrieves each agent's mutation frozenset from LineageSequenceTracker.
+      4. Groups identical haplotypes (by frozenset identity) and sums their
+         viral shedding contributions.
+      5. Normalizes to proportions.
+
+    Snapshots are stored in self.samples (dict: int day → WastewaterSample).
+    Use to_fasta(day) to get a multi-FASTA string, or simulate_sample(day, ...)
+    to pass the mixture directly to Bygul.
+
+    Requires pars['evo_pars']['enable'] = True.
 
     Args:
-        days          (list): simulation days or calendar dates to sample
-        label          (str): optional analyzer label
-        regions        (list/str): region IDs to sample, or ``'all'``
-        capture_rates  (dict): optional ``{region: fraction_entering_sample}``
+        days  (list): simulation days (int) or calendar date strings to sample.
+        label (str):  optional label for the analyzer.
+        regions (list/str): region IDs to sample, or ``'all'``
+        capture_rates (dict): optional ``{region: fraction_entering_sample}``
 
-    ``self.samples[day]`` retains the original pooled-sample interface.
-    Regional samples are available at ``self.region_samples[day][region]``.
+    Example::
+
+        ww = cv.WastewaterSampler(days=[56, 120])
+        sim = cv.Sim(pars, analyzers=[ww])
+        sim.run()
+        print(ww.to_fasta(56))
     '''
 
     def __init__(self, days, label=None, regions=None, capture_rates=None):
         super().__init__(label=label)
-        self._days_input = days
+        self._days_input = days  # raw user input; converted in initialize()
         self._regions_input = regions
         self.capture_rates = capture_rates or {}
-        self.samples = {}
+        self.samples     = {}
         self.region_samples = {}
-        self._reference = None
+        self._reference  = None  # set in initialize()
         self._regions = []
 
     def initialize(self, sim):
@@ -69,12 +91,11 @@ class WastewaterSampler(Analyzer):
             raise ValueError(
                 "WastewaterSampler requires pars['evo_pars']['enable'] = True"
             )
-
         self._reference = sim.people.sequence_tracker.reference
-        self._day_set = {
-            sim.day(day) if isinstance(day, str) else int(day)
-            for day in self._days_input
-        }
+        # Convert string dates to integer days
+        self._day_set = set()
+        for d in self._days_input:
+            self._day_set.add(sim.day(d) if isinstance(d, str) else int(d))
 
         available_regions = [int(r) for r in np.unique(sim.people.region)]
         if self._regions_input is None:
@@ -96,8 +117,9 @@ class WastewaterSampler(Analyzer):
         self.capture_rates = normalized_rates
 
     def apply(self, sim):
-        if sim.t in self._day_set:
-            self._take_sample(sim)
+        if sim.t not in self._day_set:
+            return
+        self._take_sample(sim)
 
     def _capture_weights(self, sim, inds):
         '''Return the fraction of each agent's shedding entering the sample.'''
@@ -109,17 +131,14 @@ class WastewaterSampler(Analyzer):
         return weights
 
     def _take_sample(self, sim):
-        infectious = np.nonzero(sim.people.infectious)[0]
+        # Infectious agents only
+        inds = np.nonzero(sim.people.infectious)[0]
 
-        self.samples[sim.t] = self._build_sample(
-            sim=sim,
-            inds=infectious,
-            region=None,
-        )
+        self.samples[sim.t] = self._build_sample(sim=sim, inds=inds, region=None)
 
         regional = {}
         for region in self._regions:
-            region_inds = infectious[sim.people.region[infectious] == region]
+            region_inds = inds[sim.people.region[inds] == region]
             regional[region] = self._build_sample(
                 sim=sim,
                 inds=region_inds,
@@ -138,50 +157,49 @@ class WastewaterSampler(Analyzer):
         if total <= 0:
             return None
 
-        tracker = sim.people.sequence_tracker
-        ref = self._reference
+        tracker     = sim.people.sequence_tracker
+        ref         = self._reference
         variant_map = sim.pars.get('variant_map', {})
 
-        load_by_muts = defaultdict(float)
-        label_by_muts = {}
+        load_by_muts  = defaultdict(float)
+        label_by_muts = {}   # first-seen variant label per distinct haplotype
         load_by_variant = defaultdict(float)
 
         for idx, load in zip(inds, loads):
             if load <= 0:
                 continue
 
-            i = int(idx)
+            i    = int(idx)
             muts = _agent_mutations(tracker, i, ref)
             load_by_muts[muts] += float(load)
-
-            variant_index = sim.people.infectious_variant[i]
-            if np.isnan(variant_index):
+            v = sim.people.infectious_variant[i]
+            if np.isnan(v):
                 variant_label = 'wild'
             else:
                 variant_label = variant_map.get(
-                    int(variant_index),
-                    f'variant_{int(variant_index)}',
+                    int(v),
+                    f'variant_{int(v)}',
                 )
 
             label_by_muts.setdefault(muts, variant_label)
             load_by_variant[variant_label] += float(load)
 
         mutation_sets = list(load_by_muts)
-        raw_loads = [load_by_muts[muts] for muts in mutation_sets]
+        raw_loads     = [load_by_muts[m] for m in mutation_sets]
         proportions = [load / total for load in raw_loads]
         if proportions:
             proportions[-1] = 1.0 - sum(proportions[:-1])
 
         return WastewaterSample(
-            day=sim.t,
-            date=sim.date(sim.t),
-            mutation_sets=mutation_sets,
-            variant_labels=[label_by_muts[muts] for muts in mutation_sets],
-            proportions=proportions,
-            raw_loads=raw_loads,
-            n_infectious=int(len(inds)),
-            n_genotypes=len(mutation_sets),
-            variant_shedding=dict(load_by_variant),
+            day              = sim.t,
+            date             = sim.date(sim.t),
+            mutation_sets    = mutation_sets,
+            variant_labels   = [label_by_muts[m] for m in mutation_sets],
+            proportions      = proportions,
+            raw_loads        = raw_loads,
+            n_infectious     = int(len(inds)),
+            n_genotypes      = len(mutation_sets),
+            variant_shedding = dict(load_by_variant),
             region=region,
             total_load=total,
         )
@@ -192,46 +210,56 @@ class WastewaterSampler(Analyzer):
         if region is None:
             return self.samples[day]
         return self.region_samples[day][int(region)]
+    
 
     def to_fasta(self, day, region=None):
         '''Return a multi-FASTA string for a pooled or regional sample.'''
         sample = self.get_sample(day, region=region)
         if sample is None:
             return ''
-
+        ref   = self._reference
         region_text = 'pooled' if sample.region is None else str(sample.region)
         lines = []
-        for i, (muts, prop, variant_label) in enumerate(zip(
-            sample.mutation_sets,
-            sample.proportions,
-            sample.variant_labels,
-        )):
-            lines.append(
-                f'>genotype_{i}  proportion={prop:.8f}  day={day}  '
-                f'date={sample.date}  region={region_text}  variant={variant_label}'
+        for i, (muts, prop, vlabel) in enumerate(zip(sample.mutation_sets, sample.proportions, sample.variant_labels)):
+            lines.append(f'>genotype_{i}  proportion={prop:.8f}  day={day}  '
+                f'date={sample.date}  region={region_text}  variant={vlabel}'
             )
-            lines.append(_decode_mutations(muts, self._reference))
+            lines.append(_decode_mutations(muts, ref))
         return '\n'.join(lines)
 
-    def simulate_sample(
-        self,
-        day,
-        primers,
-        reference,
-        outdir='./reads/',
-        readcnt=500,
-        redo=False,
-        region=None,
-        **bygul_kwargs,
-    ):
-        '''Generate synthetic amplicon reads for a pooled or regional sample.'''
+    def simulate_sample(self, day, primers, reference, outdir='./reads/', readcnt=500, redo=False, region=None, **bygul_kwargs):
+        ''' 
+        Write a multi-FASTA file and a proportions CSV, then invoke Bygul's simulate_proportions CLI.
+
+            Bygul's simulate_proportions command is a Click CLI that expects genome
+            sequences inside a multi-FASTA file and their relative abundances in a CSV.
+            This method writes temporary files, builds the required CLI argument list, 
+            and calls the command via Click's standalone_mode=False interface.
+
+            Args:
+                day       (int):  simulation day to sample (must be in self.samples)
+                primers   (str):  path to primer BED file (required by Bygul)
+                reference (str):  path to reference FASTA file (required by Bygul)
+                outdir    (str):  output directory for Bygul reads (default '.') (NOTE: If redo=True, Bygul will delete all contents of outdir)
+                readcnt   (int):  number of reads per amplicon (default 500)
+                redo      (bool): re-run even if output files already exist (default False)
+                **bygul_kwargs:   additional CLI options forwarded as --key value pairs
+                                (e.g. wgsim_read_length=150, wgsim_error_rate=0.0001,
+                                simulation_mode='amplicon', seed=42)
+
+            Requires the `bygul` package to be installed.
+        '''
+        import os
+        import tempfile
+        import csv
+
         try:
             from bygul._cli import simulate_proportions
-        except ImportError as exc:
+        except ImportError as e:
             raise ImportError(
-                "The 'bygul' package is required for WastewaterSampler.simulate_sample(). "
-                'Install it from the Andersen Lab Bygul repository.'
-            ) from exc
+                "The 'bygul' package is required for WastewaterSampler.simulate(). "
+                    "Install it from the Andersen Lab: https://github.com/andersen-lab/Bygul"
+            ) from e
 
         sample = self.get_sample(day, region=region)
         if sample is None:
@@ -244,24 +272,31 @@ class WastewaterSampler(Analyzer):
             suffix = 'pooled' if region is None else f'region{int(region)}'
             multifasta_path = os.path.join(tmpdir, f'wastewater_day{day}_{suffix}.fasta')
             csv_path = os.path.join(tmpdir, f'proportions_day{day}_{suffix}.csv')
+            
+            ref = self._reference
 
-            rounded = [round(p, 10) for p in sample.proportions[:-1]]
+            # Build proportions list that sums to exactly 1.0 after float parsing.
+            # Adjust the last value to absorb any rounding error.
+            props = sample.proportions
+            rounded = [round(p, 10) for p in props[:-1]]
             rounded.append(round(1.0 - sum(rounded), 10))
 
-            with open(multifasta_path, 'w') as fasta_file, open(
-                csv_path,
-                'w',
-                newline='',
-            ) as csv_file:
-                csv_writer = csv.writer(csv_file)
+            # Write both the multi-FASTA and the proportions CSV
+            with open(multifasta_path, 'w') as f_fasta, open(csv_path, 'w', newline='') as f_csv:
+                csv_writer = csv.writer(f_csv)
                 csv_writer.writerow(['sample_name', 'proportion'])
 
                 for i, muts in enumerate(sample.mutation_sets):
-                    sequence_name = f'genotype_{i}'
-                    sequence = _decode_mutations(muts, self._reference)
-                    fasta_file.write(f'>{sequence_name}\n{sequence}\n')
-                    csv_writer.writerow([sequence_name, rounded[i]])
+                    seq_name = f'genotype_{i}'
+                    seq = _decode_mutations(muts, ref)
 
+                    # Append sequence to the multi-FASTA
+                    f_fasta.write(f'>{seq_name}\n{seq}\n')
+
+                    # Write row to the CSV mapping name to proportion
+                    csv_writer.writerow([seq_name, rounded[i]])
+
+            # Build Click CLI args list using the new --multifasta and --csv parameters
             args = [
                 '--multifasta', multifasta_path,
                 '--csv', csv_path,
@@ -270,9 +305,12 @@ class WastewaterSampler(Analyzer):
                 '--outdir', outdir,
                 '--readcnt', str(readcnt),
             ]
-            for key, value in bygul_kwargs.items():
-                args.extend([f'--{key}', str(value)])
-            if redo:
-                args.append('--redo')
 
+            for key, val in bygul_kwargs.items():
+                args.extend([f'--{key}', str(val)])
+                
+                if redo:
+                    args.extend(['--redo'])
+
+                # standalone_mode=False returns the result instead of calling sys.exit
             return simulate_proportions.main(args=args, standalone_mode=False)
