@@ -911,7 +911,9 @@ class Sim(cvb.BaseSim):
             return
 
         catalog = sh.load_shedding_catalog()
-        source = sh.shedding_for('SARS-CoV-2', 'stool', catalog=catalog)
+        source = catalog.select(dataset_id="woelfel2020virological",
+                                analyte="stool", model="gamma"
+)
 
         n_days = self.pars['n_days']
         n_individuals = self['pop_size']
@@ -921,6 +923,7 @@ class Sim(cvb.BaseSim):
             source, 
             n_individuals=n_individuals, 
             times=np.arange(1, n_days + 1),
+            dispersion=0.1,  # Use a small dispersion to reduce variability
         )
         # Force integer types on time and individual_id to prevent pivot misalignment
         shedding_df['time'] = shedding_df['time'].astype(int)
