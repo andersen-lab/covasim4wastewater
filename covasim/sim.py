@@ -19,6 +19,7 @@ from . import analysis as cva
 from . import sequence_evolution as cvseq
 from . import fitness as cvfit
 from .settings import options as cvo
+import shedding_hub as sh
 
 # Almost everything in this file is contained in the Sim class
 __all__ = ['Sim', 'diff_sims', 'demo', 'AlreadyRunError']
@@ -69,7 +70,7 @@ class Sim(cvb.BaseSim):
         self._default_ver  = version  # Default version of parameters used
         self._legacy_trans = None     # Whether to use the legacy transmission calculation method (slower; for reproducing earlier results)
         self._orig_pars    = None     # Store original parameters to optionally restore at the end of the simulation
-
+        self.shedding_lookup = None     # Lookup table for viral shedding values
         # Make default parameters (using values from parameters.py)
         default_pars = cvpar.make_pars(version=version) # Start with default pars
         super().__init__(default_pars) # Initialize and set the parameters as attributes
@@ -329,7 +330,8 @@ class Sim(cvb.BaseSim):
         self.results['pop_protection']      = init_res('Population immunity protection', scale=False, color=dcols.pop_protection)
         self.results['pop_symp_protection'] = init_res('Population symptomatic protection', scale=False, color=dcols.pop_symp_protection)
         self.results['viral_load_hist'] = np.zeros((self['pop_size'], self.npts),dtype=cvd.default_float,)
-        self.results['viral_shedding_hist'] = np.zeros((self['pop_size'], self.npts),dtype=cvd.default_float,)
+        self.results['viral_shedding_hist'] = np.zeros((self['pop_size'], self.npts), dtype=cvd.default_float,)
+        self.compute_viral_shedding_lookup()
         # Handle variants
         nv = self['n_variants']
         self.results['variant'] = {}
@@ -639,7 +641,11 @@ class Sim(cvb.BaseSim):
         date_rec = people.date_recovered
         date_dead = people.date_dead
         viral_load = cvu.compute_viral_load(t, date_inf, date_rec, date_dead, frac_time, load_ratio, high_cap)
-        viral_shedding = viral_load * people.rel_trans
+        viral_shedding = cvu.compute_viral_shedding(
+            t=self.t, 
+            date_infectious=date_inf, 
+            shedding_lookup=self.shedding_lookup
+        )
         self.people.viral_load     = viral_load
         self.people.viral_shedding = viral_shedding
         self.results['viral_load_hist'][:, self.t]     = viral_load
@@ -866,6 +872,7 @@ class Sim(cvb.BaseSim):
         self.compute_doubling()
         self.compute_r_eff()
         self.compute_summary()
+        self.compute_viral_shedding_lookup()
         return
 
 
@@ -890,7 +897,52 @@ class Sim(cvb.BaseSim):
 
         self.results['variant']['incidence_by_variant'][:] = np.einsum('ji,i->ji',res['variant']['new_infections_by_variant'][:], 1/res['n_susceptible'][:]) # Calculate the incidence
         self.results['variant']['prevalence_by_variant'][:] = np.einsum('ji,i->ji',res['variant']['new_infections_by_variant'][:], 1/res['n_alive'][:])  # Calculate the prevalence
+        return
 
+
+    def compute_viral_shedding_lookup(self):
+        n_individuals = self['pop_size']
+        n_days = self.pars['n_days']
+
+        # Handle zero population size ---
+        if n_individuals <= 0:
+            # Pre-allocate an empty matrix with 0 rows and return early
+            self.shedding_lookup = np.empty((0, n_days), dtype=float)
+            return
+
+        catalog = sh.load_shedding_catalog()
+        source = catalog.select(dataset_id="woelfel2020virological",
+                                analyte="stool", model="gamma"
+)
+
+        n_days = self.pars['n_days']
+        n_individuals = self['pop_size']
+
+        # 1. Run simulation ONCE
+        shedding_df = sh.simulate_shedding(
+            source, 
+            n_individuals=n_individuals, 
+            times=np.arange(1, n_days + 1),
+            dispersion=0.1,  # Use a small dispersion to reduce variability
+        )
+        # Force integer types on time and individual_id to prevent pivot misalignment
+        shedding_df['time'] = shedding_df['time'].astype(int)
+        shedding_df['individual_id'] = shedding_df['individual_id'].astype(int)
+        # 2. Pivot the EXACT same DataFrame
+        pivoted_df = shedding_df.pivot(
+            index='individual_id', 
+            columns='time', 
+            values='value'
+        )
+        # 3. Reindex to guarantee complete mapping for all individuals and days
+        # Column 1 in pivoted_df -> Index 0 in NumPy array
+        all_individuals = np.arange(n_individuals)
+        all_times = np.arange(1, n_days + 1)
+        
+        pivoted_df = pivoted_df.reindex(index=all_individuals, columns=all_times)
+
+        # 4. Store in lookup array
+        self.shedding_lookup = pivoted_df.fillna(0.0).to_numpy()
         return
 
 

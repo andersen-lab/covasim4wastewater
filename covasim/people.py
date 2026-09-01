@@ -62,7 +62,7 @@ class People(cvb.BasePeople):
 
         # Set person properties -- all floats except for UID
         for key in self.meta.person:
-            if key == 'uid':
+            if key == 'uid' or key == 'region':
                 self[key] = np.arange(self.pars['pop_size'], dtype=cvd.default_int)
             elif key in ['n_infections', 'n_breakthroughs']:
                 self[key] = np.zeros(self.pars['pop_size'], dtype=cvd.default_int)

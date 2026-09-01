@@ -38,6 +38,7 @@ dependencies = [
     "sciris>=2.0.4",
     "bygul>=4.0.0",
     "biopython>=1.79",
+    "shedding_hub>=0.2.1"
 ]
 dynamic = ["version"]
 

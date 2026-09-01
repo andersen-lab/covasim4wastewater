@@ -93,7 +93,7 @@ def make_people(sim, popdict=None, die=True, reset=False, recreate=False, verbos
         people = popdict
         people.set_pars(sim.pars)
     else:
-        people = cvppl.People(sim.pars, uid=popdict['uid'], age=popdict['age'], sex=popdict['sex'], contacts=popdict['contacts']) # List for storing the people
+        people = cvppl.People(sim.pars, uid=popdict['uid'], age=popdict['age'], sex=popdict['sex'], contacts=popdict['contacts'], region=popdict['region']) # List for storing the people
 
     sc.printv(f'Created {pop_size} people, average age {people.age.mean():0.2f} years', 2, verbose)
 
@@ -202,12 +202,16 @@ def make_randpop(pars, use_age_data=True, use_household_data=True, sex_ratio=0.5
     age_data_prob /= age_data_prob.sum() # Ensure it sums to 1
     age_bins       = cvu.n_multinomial(age_data_prob, pop_size) # Choose age bins
     ages           = age_data_min[age_bins] + age_data_range[age_bins]*np.random.random(pop_size) # Uniformly distribute within this age bin
-
+    possible_regions = ['1', '2', '3', '4']
+    # Weighted choice: 50% 1, 20% 2, 20% 3, 10% 4
+    probabilities = [0.5, 0.2, 0.2, 0.1]
+    regions = np.random.choice(possible_regions, size=pop_size, p=probabilities)
     # Store output
     popdict = {}
     popdict['uid'] = uids
     popdict['age'] = ages
     popdict['sex'] = sexes
+    popdict['region'] = regions
 
     # Actually create the contacts
     if microstructure == 'random':

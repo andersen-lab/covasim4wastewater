@@ -13,7 +13,7 @@ import random # Used only for resetting the seed
 import sciris as sc # For additional utilities
 from .settings import options as cvo # To set options
 from . import defaults as cvd # To set default types
-
+import shedding_hub as sh
 
 # What functions are externally visible -- note, this gets populated in each section below
 __all__ = []
@@ -82,6 +82,33 @@ def compute_viral_load(t,     time_start, time_recovered, time_dead,  frac_time,
     load[invalid] = 0
 
     return load
+
+
+def compute_viral_shedding(t, date_infectious, shedding_lookup):
+    n_individuals = len(date_infectious)
+    viral_shedding = np.zeros(n_individuals, dtype=float)
+
+    inf_day = np.array(date_infectious)
+
+    t_rel = (t - inf_day)  
+
+    # Mask for individuals infecsted on or before current timestep t
+    active_mask = ~np.isnan(inf_day) & (t >= inf_day)
+
+    if not np.any(active_mask):
+        return viral_shedding
+
+    active_indices = np.where(active_mask)[0]
+    t_rel_active = t_rel[active_indices].astype(int)
+
+    # Bound relative days to maximum array columns
+    max_days = shedding_lookup.shape[1] - 1
+    t_rel_active = np.clip(t_rel_active, 0, max_days)
+
+    # Direct array indexing
+    viral_shedding[active_indices] = shedding_lookup[active_indices, t_rel_active]
+
+    return viral_shedding
 
 
 @nb.njit(            (nbfloat[:], nbfloat[:], nbbool[:], nbbool[:], nbfloat,    nbfloat[:], nbbool[:], nbbool[:], nbbool[:], nbfloat,      nbfloat,    nbfloat,     nbfloat[:]), cache=cache, parallel=safe_parallel)
