@@ -32,6 +32,7 @@ def make_pars(set_prognoses=False, prog_by_age=True, version=None, **kwargs):
 
     # Population parameters
     pars['pop_size']     = 20e3     # Number of agents, i.e., people susceptible to SARS-CoV-2
+    pars['pop_code']     = 'test'     # The population code to use for loading population data -- default is 'test', which is a small population for testing; 
     pars['pop_infected'] = 20       # Number of initial infections
     pars['pop_type']     = 'random' # What type of population data to use -- 'random' (fastest), 'synthpops' (best), 'hybrid' (compromise)
     pars['location']     = None     # What location to load data from -- default Seattle

@@ -16,9 +16,24 @@ from . import people as cvppl
 
 
 # Specify all externally visible functions this file defines
-__all__ = ['make_people', 'make_randpop', 'make_random_contacts',
+__all__ = ['make_people', 'make_randpop', 'assign_regions', 'make_random_contacts',
            'make_microstructured_contacts', 'make_hybrid_contacts',
            'make_synthpop']
+
+
+def assign_regions(pars):
+    '''Assign each agent to a configurable region or sewershed.'''
+    pop_size = int(pars['pop_size'])
+
+    population_data = cvdata.get_population_data(pars['pop_code'])
+    if population_data is None:
+        errormsg = f'Could not load population data for requested location "{pars["location"]}"'
+        raise ValueError(errormsg)
+
+    labels = population_data['region_code'].values
+    probabilities = population_data['probability'].values
+    probabilities = probabilities / np.sum(probabilities)
+    return np.random.choice(labels, size=pop_size, p=probabilities).astype(cvd.default_int)
 
 
 def make_people(sim, popdict=None, die=True, reset=False, recreate=False, verbose=None, **kwargs):
@@ -202,10 +217,7 @@ def make_randpop(pars, use_age_data=True, use_household_data=True, sex_ratio=0.5
     age_data_prob /= age_data_prob.sum() # Ensure it sums to 1
     age_bins       = cvu.n_multinomial(age_data_prob, pop_size) # Choose age bins
     ages           = age_data_min[age_bins] + age_data_range[age_bins]*np.random.random(pop_size) # Uniformly distribute within this age bin
-    possible_regions = ['1', '2', '3', '4']
-    # Weighted choice: 50% 1, 20% 2, 20% 3, 10% 4
-    probabilities = [0.5, 0.2, 0.2, 0.1]
-    regions = np.random.choice(possible_regions, size=pop_size, p=probabilities)
+    regions = assign_regions(pars)
     # Store output
     popdict = {}
     popdict['uid'] = uids
