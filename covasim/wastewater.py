@@ -36,6 +36,8 @@ class WastewaterSample:
     n_infectious:     int   # number of currently infectious agents
     n_genotypes:      int   # number of distinct haplotypes present
     variant_shedding: dict = None  # {variant_label: total_shedding} aggregated by named variant
+    region:           int = None
+    total_load:       float = 0.0
 
 
 class WastewaterSampler(Analyzer):
@@ -62,6 +64,8 @@ class WastewaterSampler(Analyzer):
     Args:
         days  (list): simulation days (int) or calendar date strings to sample.
         label (str):  optional label for the analyzer.
+        regions (list/str): region IDs to sample, or ``'all'``
+        capture_rates (dict): optional ``{region: fraction_entering_sample}``
 
     Example::
 
@@ -71,11 +75,15 @@ class WastewaterSampler(Analyzer):
         print(ww.to_fasta(56))
     '''
 
-    def __init__(self, days, label=None):
+    def __init__(self, days, label=None, regions=None, capture_rates=None):
         super().__init__(label=label)
         self._days_input = days  # raw user input; converted in initialize()
+        self._regions_input = regions
+        self.capture_rates = capture_rates or {}
         self.samples     = {}
+        self.region_samples = {}
         self._reference  = None  # set in initialize()
+        self._regions = []
 
     def initialize(self, sim):
         super().initialize(sim)
@@ -89,50 +97,100 @@ class WastewaterSampler(Analyzer):
         for d in self._days_input:
             self._day_set.add(sim.day(d) if isinstance(d, str) else int(d))
 
+        available_regions = [int(r) for r in np.unique(sim.people.region)]
+        if self._regions_input is None:
+            self._regions = []
+        elif isinstance(self._regions_input, str) and self._regions_input == 'all':
+            self._regions = available_regions
+        else:
+            self._regions = [int(r) for r in self._regions_input]
+            unknown = sorted(set(self._regions) - set(available_regions))
+            if unknown:
+                raise ValueError(f'Unknown wastewater region IDs: {unknown}')
+
+        normalized_rates = {}
+        for region, rate in self.capture_rates.items():
+            rate = float(rate)
+            if rate < 0:
+                raise ValueError('Wastewater capture rates must be non-negative')
+            normalized_rates[int(region)] = rate
+        self.capture_rates = normalized_rates
+
     def apply(self, sim):
         if sim.t not in self._day_set:
             return
         self._take_sample(sim)
 
+    def _capture_weights(self, sim, inds):
+        '''Return the fraction of each agent's shedding entering the sample.'''
+        weights = np.ones(len(inds), dtype=float)
+        if self.capture_rates:
+            regions = sim.people.region[inds]
+            for region, rate in self.capture_rates.items():
+                weights[regions == region] = rate
+        return weights
+
     def _take_sample(self, sim):
         # Infectious agents only
         inds = np.nonzero(sim.people.infectious)[0]
 
-        if len(inds) == 0:
-            self.samples[sim.t] = None
-            return
+        self.samples[sim.t] = self._build_sample(sim=sim, inds=inds, region=None)
 
-        loads       = sim.people.viral_shedding[inds]
+        regional = {}
+        for region in self._regions:
+            region_inds = inds[sim.people.region[inds] == region]
+            regional[region] = self._build_sample(
+                sim=sim,
+                inds=region_inds,
+                region=region,
+            )
+        self.region_samples[sim.t] = regional
+
+    def _build_sample(self, sim, inds, region=None):
+        '''Build one pooled or regional sample.'''
+        if len(inds) == 0:
+            return None
+
+        loads = np.asarray(sim.people.viral_shedding[inds], dtype=float)
+        loads = loads * self._capture_weights(sim, inds)
+        total = float(loads.sum())
+        if total <= 0:
+            return None
+
         tracker     = sim.people.sequence_tracker
         ref         = self._reference
         variant_map = sim.pars.get('variant_map', {})
 
         load_by_muts  = defaultdict(float)
         label_by_muts = {}   # first-seen variant label per distinct haplotype
+        load_by_variant = defaultdict(float)
+
         for idx, load in zip(inds, loads):
+            if load <= 0:
+                continue
+
             i    = int(idx)
             muts = _agent_mutations(tracker, i, ref)
             load_by_muts[muts] += float(load)
-            if muts not in label_by_muts:
-                v = sim.people.infectious_variant[i]
-                label_by_muts[muts] = (
-                    variant_map.get(int(v), 'wild') if not np.isnan(v) else 'wild'
+            v = sim.people.infectious_variant[i]
+            if np.isnan(v):
+                variant_label = 'wild'
+            else:
+                variant_label = variant_map.get(
+                    int(v),
+                    f'variant_{int(v)}',
                 )
 
-        total         = sum(load_by_muts.values())
-        mutation_sets = list(load_by_muts.keys())
+            label_by_muts.setdefault(muts, variant_label)
+            load_by_variant[variant_label] += float(load)
+
+        mutation_sets = list(load_by_muts)
         raw_loads     = [load_by_muts[m] for m in mutation_sets]
-        proportions   = [v / total for v in raw_loads]
-        proportions[-1] = 1.0 - sum(proportions[:-1])
+        proportions = [load / total for load in raw_loads]
+        if proportions:
+            proportions[-1] = 1.0 - sum(proportions[:-1])
 
-        # Aggregate shedding by named variant (mirrors old group_by='variant' logic)
-        variant_indices = sim.people.infectious_variant[inds]
-        load_by_variant = defaultdict(float)
-        for vi, load in zip(variant_indices, loads):
-            vname = variant_map.get(int(vi), f'variant_{int(vi)}')
-            load_by_variant[vname] += float(load)
-
-        self.samples[sim.t] = WastewaterSample(
+        return WastewaterSample(
             day              = sim.t,
             date             = sim.date(sim.t),
             mutation_sets    = mutation_sets,
@@ -142,23 +200,36 @@ class WastewaterSampler(Analyzer):
             n_infectious     = int(len(inds)),
             n_genotypes      = len(mutation_sets),
             variant_shedding = dict(load_by_variant),
+            region=region,
+            total_load=total,
         )
 
-    def to_fasta(self, day):
-        '''Return a multi-FASTA string for the haplotype mixture on the given day.'''
-        sample = self.samples[day]
+    def get_sample(self, day, region=None):
+        '''Return a pooled sample or a sample for one region.'''
+        day = int(day)
+        if region is None:
+            return self.samples[day]
+        return self.region_samples[day][int(region)]
+    
+
+    def to_fasta(self, day, region=None):
+        '''Return a multi-FASTA string for a pooled or regional sample.'''
+        sample = self.get_sample(day, region=region)
         if sample is None:
             return ''
         ref   = self._reference
+        region_text = 'pooled' if sample.region is None else str(sample.region)
         lines = []
         for i, (muts, prop, vlabel) in enumerate(zip(sample.mutation_sets, sample.proportions, sample.variant_labels)):
-            lines.append(f'>genotype_{i}  proportion={prop:.8f}  day={day}  date={sample.date}  variant={vlabel}')
+            lines.append(f'>genotype_{i}  proportion={prop:.8f}  day={day}  '
+                f'date={sample.date}  region={region_text}  variant={vlabel}'
+            )
             lines.append(_decode_mutations(muts, ref))
         return '\n'.join(lines)
 
-    def simulate_sample(self, day, primers, reference, outdir='./reads/', readcnt=500, redo=False, **bygul_kwargs):
-            '''
-            Write a multi-FASTA file and a proportions CSV, then invoke Bygul's simulate_proportions CLI.
+    def simulate_sample(self, day, primers, reference, outdir='./reads/', readcnt=500, redo=False, region=None, **bygul_kwargs):
+        ''' 
+        Write a multi-FASTA file and a proportions CSV, then invoke Bygul's simulate_proportions CLI.
 
             Bygul's simulate_proportions command is a Click CLI that expects genome
             sequences inside a multi-FASTA file and their relative abundances in a CSV.
@@ -177,65 +248,69 @@ class WastewaterSampler(Analyzer):
                                 simulation_mode='amplicon', seed=42)
 
             Requires the `bygul` package to be installed.
-            '''
-            import os
-            import tempfile
-            import csv
+        '''
+        import os
+        import tempfile
+        import csv
 
-            try:
-                from bygul._cli import simulate_proportions
-            except ImportError as e:
-                raise ImportError(
-                    "The 'bygul' package is required for WastewaterSampler.simulate(). "
+        try:
+            from bygul._cli import simulate_proportions
+        except ImportError as e:
+            raise ImportError(
+                "The 'bygul' package is required for WastewaterSampler.simulate(). "
                     "Install it from the Andersen Lab: https://github.com/andersen-lab/Bygul"
-                ) from e
+            ) from e
 
-            sample = self.samples[day]
-            if sample is None:
-                raise ValueError(f"No infectious agents were present on day {day}; cannot simulate.")
+        sample = self.get_sample(day, region=region)
+        if sample is None:
+            where = 'pooled sample' if region is None else f'region {region}'
+            raise ValueError(
+                f'No measurable infectious shedding was present in the {where} on day {day}'
+            )
 
-            with tempfile.TemporaryDirectory() as tmpdir:
-                multifasta_path = os.path.join(tmpdir, f'wastewater_day{day}.fasta')
-                csv_path = os.path.join(tmpdir, 'proportions.csv')
+        with tempfile.TemporaryDirectory() as tmpdir:
+            suffix = 'pooled' if region is None else f'region{int(region)}'
+            multifasta_path = os.path.join(tmpdir, f'wastewater_day{day}_{suffix}.fasta')
+            csv_path = os.path.join(tmpdir, f'proportions_day{day}_{suffix}.csv')
+            
+            ref = self._reference
 
-                ref = self._reference
+            # Build proportions list that sums to exactly 1.0 after float parsing.
+            # Adjust the last value to absorb any rounding error.
+            props = sample.proportions
+            rounded = [round(p, 10) for p in props[:-1]]
+            rounded.append(round(1.0 - sum(rounded), 10))
 
-                # Build proportions list that sums to exactly 1.0 after float parsing.
-                # Adjust the last value to absorb any rounding error.
-                props = sample.proportions
-                rounded = [round(p, 10) for p in props[:-1]]
-                rounded.append(round(1.0 - sum(rounded), 10))
+            # Write both the multi-FASTA and the proportions CSV
+            with open(multifasta_path, 'w') as f_fasta, open(csv_path, 'w', newline='') as f_csv:
+                csv_writer = csv.writer(f_csv)
+                csv_writer.writerow(['sample_name', 'proportion'])
 
-                # Write both the multi-FASTA and the proportions CSV
-                with open(multifasta_path, 'w') as f_fasta, open(csv_path, 'w', newline='') as f_csv:
-                    csv_writer = csv.writer(f_csv)
-                    csv_writer.writerow(['sample_name', 'proportion'])
+                for i, muts in enumerate(sample.mutation_sets):
+                    seq_name = f'genotype_{i}'
+                    seq = _decode_mutations(muts, ref)
 
-                    for i, muts in enumerate(sample.mutation_sets):
-                        seq_name = f'genotype_{i}'
-                        seq = _decode_mutations(muts, ref)
-                        
-                        # Append sequence to the multi-FASTA
-                        f_fasta.write(f'>{seq_name}\n{seq}\n')
-                        
-                        # Write row to the CSV mapping name to proportion
-                        csv_writer.writerow([seq_name, rounded[i]])
+                    # Append sequence to the multi-FASTA
+                    f_fasta.write(f'>{seq_name}\n{seq}\n')
 
-                # Build Click CLI args list using the new --multifasta and --csv parameters
-                args = [
-                    '--multifasta', multifasta_path,
-                    '--csv', csv_path,
-                    '--primers', primers,
-                    '--reference', reference,
-                    '--outdir', outdir,
-                    '--readcnt', str(readcnt),
-                ]
+                    # Write row to the CSV mapping name to proportion
+                    csv_writer.writerow([seq_name, rounded[i]])
 
-                for key, val in bygul_kwargs.items():
-                    args.extend([f'--{key}', str(val)])
+            # Build Click CLI args list using the new --multifasta and --csv parameters
+            args = [
+                '--multifasta', multifasta_path,
+                '--csv', csv_path,
+                '--primers', primers,
+                '--reference', reference,
+                '--outdir', outdir,
+                '--readcnt', str(readcnt),
+            ]
 
+            for key, val in bygul_kwargs.items():
+                args.extend([f'--{key}', str(val)])
+                
                 if redo:
                     args.extend(['--redo'])
 
                 # standalone_mode=False returns the result instead of calling sys.exit
-                simulate_proportions.main(args=args, standalone_mode=False)
+            return simulate_proportions.main(args=args, standalone_mode=False)

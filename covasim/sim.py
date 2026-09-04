@@ -641,10 +641,11 @@ class Sim(cvb.BaseSim):
         date_rec = people.date_recovered
         date_dead = people.date_dead
         viral_load = cvu.compute_viral_load(t, date_inf, date_rec, date_dead, frac_time, load_ratio, high_cap)
-        viral_shedding = cvu.compute_viral_shedding(
-            t=self.t, 
-            date_infectious=date_inf, 
-            shedding_lookup=self.shedding_lookup
+        viral_shedding = cvu.compute_wastewater_shedding(
+            t=t,
+            people=people,
+            viral_load=viral_load,
+            pars=self.pars.get('wastewater_pars'),
         )
         self.people.viral_load     = viral_load
         self.people.viral_shedding = viral_shedding
@@ -685,6 +686,18 @@ class Sim(cvb.BaseSim):
                 p1 = layer['p1']
                 p2 = layer['p2']
                 betas = layer['beta']
+
+                # Lightweight spatial mixing: preserve the contact network, but
+                # optionally reduce transmission across region boundaries.
+                region_pars = self.pars.get('region_pars') or {}
+                cross_region_factor = float(region_pars.get('cross_region_contact_factor', 1.0))
+                
+                if cross_region_factor != 1.0 and cross_region_factor >= 0.0 and 'region' in people.keys(): 
+                    same_region = people.region[p1] == people.region[p2]
+                    betas = np.asarray(
+                        betas * np.where(same_region, 1.0, cross_region_factor),
+                        dtype=cvd.default_float,
+                    )
 
                 # Compute relative transmission and susceptibility
                 sus_imm = people.sus_imm[variant,:]
