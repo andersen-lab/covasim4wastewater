@@ -4,12 +4,14 @@ Load data
 
 #%% Housekeeping
 import numpy as np
+import pandas as pd
+import os
 import sciris as sc
 from . import country_age_data    as cad
 from . import state_age_data      as sad
 from . import household_size_data as hsd
 
-__all__ = ['get_country_aliases', 'map_entries', 'show_locations', 'get_age_distribution', 'get_household_size']
+__all__ = ['get_country_aliases', 'map_entries', 'show_locations', 'get_age_distribution', 'get_household_size', 'get_population_data']
 
 
 def get_country_aliases():
@@ -132,7 +134,36 @@ def show_locations(location=None, output=False):
         print('\nList of available locations (case insensitive):\n')
         sc.pp(loclist)
         return
-
+    
+def get_population_data(code='test'):
+    """
+    Function to load population data from a CSV file.
+    Returns:
+        pandas.DataFrame: A DataFrame containing population data.
+    
+    Example data format in the CSV file:
+        region_code, population
+        1, 1000000
+        2, 500000
+        3, 750000
+        4, 250000
+    """
+    population_data = None
+    try:
+        population_data = pd.read_csv(f'data/population/{code}.csv')
+    except FileNotFoundError:
+        print(f"WARNING: Population data file not found for code: {code} on path: {os.path.abspath(f'data/population/{code}.csv')}")
+        print("WARNING: Loading default population data instead.")
+        population_data= {
+            'region_code': [1, 2, 3, 4],
+            'population': [1000000, 500000, 750000, 250000]
+        }
+        population_data = pd.DataFrame(population_data)
+    except Exception as e:
+        raise RuntimeError(f"An error occurred while loading population data: {e}")
+    if population_data is not None:
+        population_data['probability'] = population_data['population'] / population_data['population'].sum()
+    return population_data
 
 def get_age_distribution(location=None):
     '''
