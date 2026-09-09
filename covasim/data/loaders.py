@@ -10,6 +10,13 @@ import sciris as sc
 from . import country_age_data    as cad
 from . import state_age_data      as sad
 from . import household_size_data as hsd
+import functools
+import requests
+import geopandas as gpd
+import rasterio
+from rasterio.mask import mask
+import country_converter as coco
+
 
 __all__ = ['get_country_aliases', 'map_entries', 'show_locations', 'get_age_distribution', 'get_household_size', 'get_population_data']
 
