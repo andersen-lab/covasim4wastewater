@@ -141,36 +141,113 @@ def show_locations(location=None, output=False):
         print('\nList of available locations (case insensitive):\n')
         sc.pp(loclist)
         return
-    
-def get_population_data(code='test'):
+
+
+RASTER_CACHE_DIR = 'data/cache/worldpop'
+os.makedirs(RASTER_CACHE_DIR, exist_ok=True)
+
+def download_pop_data(url, out_path, chunk_size=8192):
+    """Streams and saves a remote file with progress printouts."""
+    if os.path.exists(out_path):
+        return out_path
+        
+    print(f"Downloading: {url}")
+    with requests.get(url, stream=True) as r:
+        r.raise_for_status()
+        total = int(r.headers.get("content-length", 0))
+        downloaded = 0
+        with open(out_path, "wb") as f:
+            for chunk in r.iter_content(chunk_size=chunk_size):
+                f.write(chunk)
+                downloaded += len(chunk)
+                if total:
+                    print(f"\r{downloaded/1e6:.1f} / {total/1e6:.1f} MB", end="")
+    print()
+    return out_path
+
+
+@functools.lru_cache(maxsize=32)
+def get_population_data(
+    country_name=None, 
+    year=None, 
+    admin_level=None
+):
     """
-    Function to load population data from a CSV file.
-    Returns:
-        pandas.DataFrame: A DataFrame containing population data.
-    
-    Example data format in the CSV file:
-        region_code, population
-        1, 1000000
-        2, 500000
-        3, 750000
-        4, 250000
+    Takes a user-friendly country name (e.g., 'Zambia', 'United States', 'Kenya'),
+    converts it to ISO codes, fetches the matching WorldPop raster and GADM shapefile,
+    and returns a DataFrame with integer region_codes and probabilities.
     """
     population_data = None
+
+    # 1. Convert user country name to standard ISO-alpha3 (e.g., 'Zambia' -> 'ZMB')
+    iso_upper = coco.convert(names=country_name, to='ISO3')
+    
+    if iso_upper == 'not found':
+        raise ValueError(f"Could not resolve country name: '{country_name}'")
+        
+    iso_lower = iso_upper.lower()
+
+    # Dynamic URLs based on resolved ISO code
+    worldpop_url = f"https://data.worldpop.org/GIS/Population/Global_2000_2020/{year}/{iso_upper}/{iso_lower}_ppp_{year}.tif"
+    gadm_url = f"https://geodata.ucdavis.edu/gadm/gadm4.1/gpkg/gadm41_{iso_upper}.gpkg"
+    layer_name = f"ADM_ADM_{admin_level}"
+    region_name_col = f"NAME_{admin_level}"
+
     try:
-        population_data = pd.read_csv(f'data/population/{code}.csv')
-    except FileNotFoundError:
-        print(f"WARNING: Population data file not found for code: {code} on path: {os.path.abspath(f'data/population/{code}.csv')}")
-        print("WARNING: Loading default population data instead.")
-        population_data= {
-            'region_code': [1, 2, 3, 4],
-            'population': [1000000, 500000, 750000, 250000]
-        }
-        population_data = pd.DataFrame(population_data)
+        # 2. Download/Cache WorldPop GeoTIFF & GADM Boundaries
+        raster_path = os.path.join(RASTER_CACHE_DIR, f"{iso_lower}_ppp_{year}.tif")
+        download_pop_data(worldpop_url, raster_path)
+
+        gadm_path = os.path.join(RASTER_CACHE_DIR, f"gadm41_{iso_upper}.gpkg")
+        download_pop_data(gadm_url, gadm_path)
+
+        # 3. Read Regions Boundary file
+        regions_gdf = gpd.read_file(gadm_path, layer=layer_name)
+
+        # 4. Extract population per region polygon
+        region_names = []
+        populations = []
+
+        with rasterio.open(raster_path) as src:
+            if regions_gdf.crs != src.crs:
+                regions_gdf = regions_gdf.to_crs(src.crs)
+
+            nodata_val = src.nodata if src.nodata is not None else -9999
+
+            for idx, row in regions_gdf.iterrows():
+                out_image, _ = mask(src, [row.geometry], crop=True)
+                data = out_image[0].astype(float)
+                
+                data = np.where((data == nodata_val) | (data < 0), np.nan, data)
+                pop_sum = float(np.nansum(data))
+                
+                # Handle boundary naming falls back cleanly
+                name = row.get(region_name_col, f"Region_{idx+1}")
+                region_names.append(name)
+                populations.append(pop_sum)
+
+        # 5. Build output DataFrame with integer region_code & text region_name
+        population_data = pd.DataFrame({
+            'region_code': range(1, len(region_names) + 1),  # Integer IDs for Covasim
+            'region_name': region_names,                    # Real names ('Lusaka', etc.)
+            'population': populations
+        })
+
     except Exception as e:
-        raise RuntimeError(f"An error occurred while loading population data: {e}")
+        print(f"WARNING: WorldPop processing failed ({e}). Returning default fallback data.")
+        population_data = pd.DataFrame({
+            'region_code': [1, 2, 3, 4],
+            'region_name': ['Region 1', 'Region 2', 'Region 3', 'Region 4'],
+            'population': [1000000, 500000, 750000, 250000]
+        })
+
+    # 6. Compute probability
     if population_data is not None:
-        population_data['probability'] = population_data['population'] / population_data['population'].sum()
+        total_pop = population_data['population'].sum()
+        population_data['probability'] = population_data['population'] / (total_pop if total_pop > 0 else 1.0)
+    population_data.to_csv('data/population/population_data.csv', index=False)
     return population_data
+
 
 def get_age_distribution(location=None):
     '''
