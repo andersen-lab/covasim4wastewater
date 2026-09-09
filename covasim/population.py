@@ -25,7 +25,7 @@ def assign_regions(pars):
     '''Assign each agent to a configurable region or sewershed.'''
     pop_size = int(pars['pop_size'])
 
-    population_data = cvdata.get_population_data(pars['location'])
+    population_data = cvdata.get_population_data(pars['location'], year=pars['pop_data_year'], admin_level=pars['pop_admin_level'])
     if population_data is None:
         errormsg = f'Could not load population data for requested location "{pars["location"]}"'
         raise ValueError(errormsg)
