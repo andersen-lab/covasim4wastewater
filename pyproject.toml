@@ -42,7 +42,7 @@ dependencies = [
     "geopandas",
     "exactextract",
     "rasterio",
-    "country_converter,
+    "country_converter",
 ]
 dynamic = ["version"]
 
