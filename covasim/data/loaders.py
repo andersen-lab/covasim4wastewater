@@ -189,7 +189,7 @@ def get_population_data(
         population_data = default_df.copy()
         total_pop = population_data['population'].sum()
         population_data['probability'] = population_data['population'] / (total_pop if total_pop > 0 else 1.0)
-        population_data.to_csv('data/population/population_data.csv', index=False)
+        population_data.to_csv('population_data.csv', index=False)
         return population_data
 
     # 1. Convert user country name to standard ISO-alpha3 (e.g., 'Zambia' -> 'ZMB')
