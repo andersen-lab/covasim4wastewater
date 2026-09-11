@@ -254,7 +254,7 @@ def get_population_data(
     total_pop = population_data['population'].sum()
     population_data['probability'] = population_data['population'] / (total_pop if total_pop > 0 else 1.0)
     
-    population_data.to_csv('data/population/population_data.csv', index=False)
+    population_data.to_csv('population_data.csv', index=False)
     return population_data
 
 
