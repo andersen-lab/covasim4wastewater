@@ -168,16 +168,29 @@ def download_pop_data(url, out_path, chunk_size=8192):
 
 @functools.lru_cache(maxsize=32)
 def get_population_data(
-    country_name=None, 
-    year=None, 
-    admin_level=None
+    country_name, 
+    year, 
+    admin_level
 ):
     """
     Takes a user-friendly country name (e.g., 'Zambia', 'United States', 'Kenya'),
     converts it to ISO codes, fetches the matching WorldPop raster and GADM shapefile,
     and returns a DataFrame with integer region_codes and probabilities.
     """
-    population_data = None
+    # Define default fallback DataFrame
+    default_df = pd.DataFrame({
+        'region_code': [1, 2, 3, 4],
+        'region_name': ['Region 1', 'Region 2', 'Region 3', 'Region 4'],
+        'population': [1000000, 500000, 750000, 250000]
+    })
+
+    # Return fallback immediately if key parameters are missing
+    if country_name is None or year is None or admin_level is None:
+        population_data = default_df.copy()
+        total_pop = population_data['population'].sum()
+        population_data['probability'] = population_data['population'] / (total_pop if total_pop > 0 else 1.0)
+        population_data.to_csv('data/population/population_data.csv', index=False)
+        return population_data
 
     # 1. Convert user country name to standard ISO-alpha3 (e.g., 'Zambia' -> 'ZMB')
     iso_upper = coco.convert(names=country_name, to='ISO3')
@@ -188,8 +201,8 @@ def get_population_data(
     iso_lower = iso_upper.lower()
 
     # Dynamic URLs based on resolved ISO code
-    worldpop_url = f"https://data.worldpop.org/GIS/Population/Global_2000_2020/{year}/{iso_upper}/{iso_lower}_ppp_{year}.tif"
-    gadm_url = f"https://geodata.ucdavis.edu/gadm/gadm4.1/gpkg/gadm41_{iso_upper}.gpkg"
+    worldpop_url = f"[https://data.worldpop.org/GIS/Population/Global_2000_2020/](https://data.worldpop.org/GIS/Population/Global_2000_2020/){year}/{iso_upper}/{iso_lower}_ppp_{year}.tif"
+    gadm_url = f"[https://geodata.ucdavis.edu/gadm/gadm4.1/gpkg/gadm41](https://geodata.ucdavis.edu/gadm/gadm4.1/gpkg/gadm41)_{iso_upper}.gpkg"
     layer_name = f"ADM_ADM_{admin_level}"
     region_name_col = f"NAME_{admin_level}"
 
@@ -235,16 +248,12 @@ def get_population_data(
 
     except Exception as e:
         print(f"WARNING: WorldPop processing failed ({e}). Returning default fallback data.")
-        population_data = pd.DataFrame({
-            'region_code': [1, 2, 3, 4],
-            'region_name': ['Region 1', 'Region 2', 'Region 3', 'Region 4'],
-            'population': [1000000, 500000, 750000, 250000]
-        })
+        population_data = default_df.copy()
 
     # 6. Compute probability
-    if population_data is not None:
-        total_pop = population_data['population'].sum()
-        population_data['probability'] = population_data['population'] / (total_pop if total_pop > 0 else 1.0)
+    total_pop = population_data['population'].sum()
+    population_data['probability'] = population_data['population'] / (total_pop if total_pop > 0 else 1.0)
+    
     population_data.to_csv('data/population/population_data.csv', index=False)
     return population_data
 
