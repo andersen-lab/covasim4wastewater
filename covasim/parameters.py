@@ -35,8 +35,8 @@ def make_pars(set_prognoses=False, prog_by_age=True, version=None, **kwargs):
     pars['pop_infected'] = 20       # Number of initial infections
     pars['pop_type']     = 'random' # What type of population data to use -- 'random' (fastest), 'synthpops' (best), 'hybrid' (compromise)
     pars['location']     = None    # What location to load data from -- default Seattle
-    pars['pop_data_year'] = None     # What year to load population data from -- default 2020
-    pars['pop_admin_level'] = None        # What admin level to load population data from -- default 1
+    pars['pop_data_year'] = 2020     # What year to load population data from -- default 2020
+    pars['pop_admin_level'] = 1        # What admin level to load population data from -- default 1
     # Simulation parameters
     pars['start_day']  = '2020-03-01' # Start day of the simulation
     pars['end_day']    = None         # End day of the simulation
