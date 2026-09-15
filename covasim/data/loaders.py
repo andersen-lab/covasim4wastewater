@@ -201,8 +201,8 @@ def get_population_data(
     iso_lower = iso_upper.lower()
 
     # Dynamic URLs based on resolved ISO code
-    worldpop_url = f"[https://data.worldpop.org/GIS/Population/Global_2000_2020/](https://data.worldpop.org/GIS/Population/Global_2000_2020/){year}/{iso_upper}/{iso_lower}_ppp_{year}.tif"
-    gadm_url = f"[https://geodata.ucdavis.edu/gadm/gadm4.1/gpkg/gadm41](https://geodata.ucdavis.edu/gadm/gadm4.1/gpkg/gadm41)_{iso_upper}.gpkg"
+    worldpop_url = f"https://data.worldpop.org/GIS/Population/Global_2000_2020/{year}/{iso_upper}/{iso_lower}_ppp_{year}.tif"
+    gadm_url = f"https://geodata.ucdavis.edu/gadm/gadm4.1/gpkg/gadm41_{iso_upper}.gpkg"
     layer_name = f"ADM_ADM_{admin_level}"
     region_name_col = f"NAME_{admin_level}"
 
