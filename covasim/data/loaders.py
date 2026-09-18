@@ -179,9 +179,9 @@ def get_population_data(
     """
     # Define default fallback DataFrame
     default_df = pd.DataFrame({
-        'region_code': [1, 2, 3, 4],
-        'region_name': ['Region 1', 'Region 2', 'Region 3', 'Region 4'],
-        'population': [1000000, 500000, 750000, 250000]
+        'region_code': [1],
+        'region_name': ['Region 1'],
+        'population': [1000000],
     })
 
     # Return fallback immediately if key parameters are missing
