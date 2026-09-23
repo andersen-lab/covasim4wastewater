@@ -144,3 +144,13 @@ node_modules
 
 # Bygyl outputs
 reads/
+
+# certain file types
+*.json
+*.state
+*.bionj
+*.ckp.gz
+*.iqtree
+*.treefile
+*.state
+*.mldist
