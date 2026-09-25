@@ -13,7 +13,7 @@ import covasim as cv
 import pytest
 
 pop_size = 500
-filename = 'example_regression.sim'
+filename = 'tests/example_regression.sim'
 version = '1.7.0'
 
 
