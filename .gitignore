@@ -154,3 +154,5 @@ reads/
 *.treefile
 *.state
 *.mldist
+*.fasta
+*.png
