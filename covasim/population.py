@@ -37,21 +37,20 @@ def assign_regions(pars):
     return np.random.choice(labels, size=pop_size, p=probabilities).astype(cvd.default_int)
 
 def assign_coords(regions):
-    for i, region in enumerate(regions):
-            # TODO: Need to implement a way to get the actual coordinates of the region from the population data and assign them to region_data
-            # region_data = get_region_data(region) # This function needs to be implemented to get the actual coordinates of the region
-            region_data = {'x_min': -180, 'x_max': 180, 'y_min': -90, 'y_max': 90} 
-            if region_data is not None:
-                x_min, x_max = region_data['x_min'], region_data['x_max']
-                y_min, y_max = region_data['y_min'], region_data['y_max']
-                x = np.random.uniform(x_min, x_max)
-                y = np.random.uniform(y_min, y_max)
-                if i == 0:
-                    xs = [x]
-                    ys = [y]
-                else:
-                    xs.append(x)
-                    ys.append(y)
+    xs = []
+    ys = []
+    for region in regions:
+        # TODO: Need to implement a way to get the actual coordinates of the region from the population data and assign them to region_data
+        region_data = {'x_min': -180, 'x_max': 180, 'y_min': -90, 'y_max': 90} 
+        if region_data is not None:
+            x_min, x_max = region_data['x_min'], region_data['x_max']
+            y_min, y_max = region_data['y_min'], region_data['y_max']
+            xs.append(np.random.uniform(x_min, x_max))
+            ys.append(np.random.uniform(y_min, y_max))
+
+    if not xs:
+        return np.empty((0, 2))  # Handles the empty regions case cleanly
+        
     return np.column_stack((xs, ys))
 
 def make_people(sim, popdict=None, die=True, reset=False, recreate=False, verbose=None, **kwargs):
