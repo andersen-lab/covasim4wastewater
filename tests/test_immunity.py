@@ -25,7 +25,7 @@ base_pars = sc.objdict(
 def test_states():
     ''' Test state consistency against state_diagram.xlsx '''
 
-    filename = 'state_diagram.xlsx'
+    filename = 'tests/state_diagram.xlsx'
     sheets   = ['Without waning', 'With waning']
     indexcol = 'In ↓ you can be →'
 

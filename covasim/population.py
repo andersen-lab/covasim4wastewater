@@ -13,13 +13,46 @@ from . import data as cvdata
 from . import defaults as cvd
 from . import parameters as cvpar
 from . import people as cvppl
+from .sewersheds import assign_sewersheds
 
 
 # Specify all externally visible functions this file defines
-__all__ = ['make_people', 'make_randpop', 'make_random_contacts',
+__all__ = ['make_people', 'make_randpop', 'assign_regions', 'make_random_contacts',
            'make_microstructured_contacts', 'make_hybrid_contacts',
            'make_synthpop']
 
+
+def assign_regions(pars):
+    '''Assign each agent to a configurable population region.'''
+    pop_size = int(pars['pop_size'])
+
+    population_data = cvdata.get_population_data(pars['location'], year=pars['pop_data_year'], admin_level=pars['pop_admin_level'])
+    if population_data is None:
+        errormsg = f'Could not load population data for requested location "{pars["location"]}"'
+        raise ValueError(errormsg)
+
+    labels = population_data['region_code'].values
+    probabilities = population_data['probability'].values
+    probabilities = probabilities / np.sum(probabilities)
+    return np.random.choice(labels, size=pop_size, p=probabilities).astype(cvd.default_int)
+
+def assign_coords(regions):
+    for i, region in enumerate(regions):
+            # TODO: Need to implement a way to get the actual coordinates of the region from the population data and assign them to region_data
+            # region_data = get_region_data(region) # This function needs to be implemented to get the actual coordinates of the region
+            region_data = {'x_min': -180, 'x_max': 180, 'y_min': -90, 'y_max': 90} 
+            if region_data is not None:
+                x_min, x_max = region_data['x_min'], region_data['x_max']
+                y_min, y_max = region_data['y_min'], region_data['y_max']
+                x = np.random.uniform(x_min, x_max)
+                y = np.random.uniform(y_min, y_max)
+                if i == 0:
+                    xs = [x]
+                    ys = [y]
+                else:
+                    xs.append(x)
+                    ys.append(y)
+    return np.column_stack((xs, ys))
 
 def make_people(sim, popdict=None, die=True, reset=False, recreate=False, verbose=None, **kwargs):
     '''
@@ -64,6 +97,7 @@ def make_people(sim, popdict=None, die=True, reset=False, recreate=False, verbos
 
     # If a people object or popdict is supplied, use it
     if sim.people and not reset:
+        assign_sewersheds(sim.people, sim.pars)
         sim.people.initialize(sim_pars=sim.pars)
         return sim.people # If it's already there, just return
     elif sim.popdict and popdict is None:
@@ -93,7 +127,10 @@ def make_people(sim, popdict=None, die=True, reset=False, recreate=False, verbos
         people = popdict
         people.set_pars(sim.pars)
     else:
-        people = cvppl.People(sim.pars, uid=popdict['uid'], age=popdict['age'], sex=popdict['sex'], contacts=popdict['contacts'], region=popdict['region']) # List for storing the people
+        spatial = {key: popdict[key] for key in ('x', 'y') if key in popdict.keys()}
+        people = cvppl.People(sim.pars, uid=popdict['uid'], age=popdict['age'], sex=popdict['sex'], contacts=popdict['contacts'], region=popdict['region'], **spatial) # List for storing the people
+
+    assign_sewersheds(people, sim.pars)
 
     sc.printv(f'Created {pop_size} people, average age {people.age.mean():0.2f} years', 2, verbose)
 
@@ -202,10 +239,9 @@ def make_randpop(pars, use_age_data=True, use_household_data=True, sex_ratio=0.5
     age_data_prob /= age_data_prob.sum() # Ensure it sums to 1
     age_bins       = cvu.n_multinomial(age_data_prob, pop_size) # Choose age bins
     ages           = age_data_min[age_bins] + age_data_range[age_bins]*np.random.random(pop_size) # Uniformly distribute within this age bin
-    possible_regions = ['1', '2', '3', '4']
-    # Weighted choice: 50% 1, 20% 2, 20% 3, 10% 4
-    probabilities = [0.5, 0.2, 0.2, 0.1]
-    regions = np.random.choice(possible_regions, size=pop_size, p=probabilities)
+    regions = assign_regions(pars)
+    pars['people_coords'] = assign_coords(regions)
+                
     # Store output
     popdict = {}
     popdict['uid'] = uids

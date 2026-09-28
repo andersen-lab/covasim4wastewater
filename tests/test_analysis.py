@@ -111,7 +111,7 @@ def test_fit():
     # Create a testing intervention to ensure some fit to data
     tp = cv.test_prob(0.1)
 
-    sim = cv.Sim(pars, rand_seed=1, interventions=tp, datafile="example_data.csv")
+    sim = cv.Sim(pars, rand_seed=1, interventions=tp, datafile="tests/example_data.csv")
     sim.run()
 
     # Checking that Fit can handle custom input
@@ -119,7 +119,7 @@ def test_fit():
     fit1 = sim.compute_fit(custom=custom_inputs, compute=True)
 
     # Test that different seed will change compute results
-    sim2 = cv.Sim(pars, rand_seed=2, interventions=tp, datafile="example_data.csv")
+    sim2 = cv.Sim(pars, rand_seed=2, interventions=tp, datafile="tests/example_data.csv")
     sim2.run()
     fit2 = sim2.compute_fit(custom=custom_inputs)
 
@@ -157,7 +157,7 @@ def test_calibration():
         interventions = [cv.test_prob(symp_prob=0.1)],
     )
 
-    sim = cv.Sim(pars, datafile='example_data.csv')
+    sim = cv.Sim(pars, datafile='tests/example_data.csv')
 
     calib_pars = dict(
         beta      = [0.013, 0.005, 0.020],
