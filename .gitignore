@@ -144,3 +144,5 @@ node_modules
 
 # Bygyl outputs
 reads/
+data/cache/*
+population_data.csv

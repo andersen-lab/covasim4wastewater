@@ -40,6 +40,7 @@ dependencies = [
     "biopython>=1.79",
     "shedding_hub>=0.2.1",
     "geopandas",
+    "shapely>=1.8",
     "exactextract",
     "rasterio",
     "country_converter",
