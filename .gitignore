@@ -6,7 +6,7 @@ data/epi_data
 .vscode
 .DS_Store
 
-
+data/cache/worldpop
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -144,3 +144,5 @@ node_modules
 
 # Bygyl outputs
 reads/
+data/cache/*
+population_data.csv
