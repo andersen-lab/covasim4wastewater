@@ -1,0 +1,7 @@
+evo_pars:
+  enable: true
+  reference: "/home/jhkim/covasim_project/covasim4wastewater/docs/tutorials/sars-2-data/NC_045512_Hu-1.fasta"
+  mol_clock_rate: 0.000001
+  sub_model: "JC"
+  fitness_data_path: "/home/jhkim/covasim_project/covasim4wastewater/data/nt_fitness.csv"
+  store_infection_log: true

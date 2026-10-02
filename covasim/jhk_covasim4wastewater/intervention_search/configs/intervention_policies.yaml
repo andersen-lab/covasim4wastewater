@@ -1,0 +1,47 @@
+intervention_policies:
+
+  baseline:
+    name: "baseline"
+    description: "No intervention; observation only"
+    beta_reduction: 0.0
+    duration: 0
+    p_test: 0.35
+    p_seq: 0.25
+    quiet_period: 0
+    trigger_list: []
+
+  policy_A:
+    name: "high_testing"
+    description: "Strong testing, weak distancing"
+    beta_reduction: 0.025
+    duration: 14
+    trigger_type: "diagnosis"
+    p_test: 0.5
+    p_seq: 0.3
+    quiet_period: 0
+    trigger_list:
+      - ["weekly_growth", {"ratio": 1.1}]
+
+  policy_B:
+    name: "strong_distancing"
+    description: "Weak testing, strong distancing"
+    beta_reduction: 0.05
+    duration: 7
+    trigger_type: "diagnosis"
+    p_test: 0.2
+    p_seq: 0.1
+    quiet_period: 0
+    trigger_list:
+      - ["weekly_growth", {"ratio": 1.1}]
+
+  policy_C:
+    name: "balanced"
+    description: "Balanced testing and distancing"
+    beta_reduction: 0.0375
+    duration: 7
+    trigger_type: "diagnosis"
+    p_test: 0.35
+    p_seq: 0.2
+    quiet_period: 0
+    trigger_list:
+      - ["weekly_growth", {"ratio": 1.1}]
