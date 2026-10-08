@@ -294,9 +294,11 @@ def make_randpop(pars, use_age_data=True, use_household_data=True, sex_ratio=0.5
     age_data_prob /= age_data_prob.sum() # Ensure it sums to 1
     age_bins       = cvu.n_multinomial(age_data_prob, pop_size) # Choose age bins
     ages           = age_data_min[age_bins] + age_data_range[age_bins]*np.random.random(pop_size) # Uniformly distribute within this age bin
-    regions = assign_regions(pars)
-    pars['people_coords'] = assign_coords(regions)
-                
+    population_data = load_population_regions(pars['boundary_shapefile'])
+    regions = assign_regions(pars, population_data)
+    coords = assign_coords(regions, population_data)
+    pars['people_coords'] = coords
+
     # Store output
     popdict = {}
     popdict['uid'] = uids
