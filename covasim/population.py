@@ -19,26 +19,71 @@ import pandas as pd
 from shapely.geometry import Point
 
 # Specify all externally visible functions this file defines
-__all__ = ['make_people', 'make_randpop', 'assign_regions', 'make_random_contacts',
+__all__ = ['make_people', 'make_randpop', 'assign_regions',
+           'assign_coords', 'make_random_contacts',
            'make_microstructured_contacts', 'make_hybrid_contacts',
            'make_synthpop']
 
+def load_population_regions(filename):
+    regions = gpd.read_file(filename)
 
-def assign_regions(pars):
-    '''Assign each agent to a configurable population region.'''
-    pop_size = int(pars['pop_size'])
+    required = {
+        "region_code",
+        "region_name",
+        "population",
+    }
 
-    population_data = cvdata.get_population_data(pars['location'], year=pars['pop_data_year'], admin_level=pars['pop_admin_level'])
-    if population_data is None:
-        errormsg = f'Could not load population data for requested location "{pars["location"]}"'
-        raise ValueError(errormsg)
+    missing = required - set(regions.columns)
 
-    labels = population_data['region_code'].values
-    probabilities = population_data['probability'].values
-    probabilities = probabilities / np.sum(probabilities)
-    return np.random.choice(labels, size=pop_size, p=probabilities).astype(cvd.default_int)
+    if missing:
+        raise ValueError(
+            f"Population boundary file is missing columns: {missing}"
+        )
 
-def assign_coords(regions):
+    if regions.empty:
+        raise ValueError("Population boundary file contains no regions.")
+
+    regions["population"] = pd.to_numeric(
+        regions["population"],
+        errors="raise",
+    )
+
+    if (regions["population"] < 0).any():
+        raise ValueError("Population cannot be negative.")
+
+    total_population = regions["population"].sum()
+
+    if total_population <= 0:
+        raise ValueError("Total population must be greater than zero.")
+
+    regions["probability"] = (
+        regions["population"] / total_population
+    )
+
+    return regions
+
+def assign_regions(pars, population_data):
+    pop_size = int(pars["pop_size"])
+
+    labels = population_data["region_code"].to_numpy()
+    probabilities = population_data["probability"].to_numpy()
+
+    return np.random.choice(
+        labels,
+        size=pop_size,
+        p=probabilities,
+    )
+
+def assign_coords(assigned_region_codes, population_data):
+    """
+    Generate coordinates for agents based on their assigned region geometry.
+    
+    assigned_region_codes: array of region_code values assigned to each agent.
+    population_data: GeoDataFrame loaded by load_population_regions.
+    """
+    # Index the population GeoDataFrame by region_code for fast lookup
+    pop_indexed = population_data.set_index("region_code")
+
     xs = []
     ys = []
     for region in regions:
