@@ -37,7 +37,8 @@ def make_pars(set_prognoses=False, prog_by_age=True, version=None, **kwargs):
     pars['location']     = None    # What location to load data from -- default Seattle
     pars['boundary_shapefile']     = None # Optional shapefile for the boundary of the population; if None, use the whole population
     pars['sewershed_file'] = None   # Optional CSV with sid,polygon; None means one whole-population catchment
-    pars['people_coords'] = None    # Optional (pop_size, 2) home coordinates, in polygon coordinate system
+    pars['people_coords'] = None   # Optional array of shape (pop_size, 2) with x,y coordinates for each person; if None, assign randomly within the boundary shapefile
+      
     # Simulation parameters
     pars['start_day']  = '2020-03-01' # Start day of the simulation
     pars['end_day']    = None         # End day of the simulation
