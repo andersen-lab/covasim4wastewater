@@ -14,7 +14,9 @@ from . import defaults as cvd
 from . import parameters as cvpar
 from . import people as cvppl
 from .sewersheds import assign_sewersheds
-
+import geopandas as gpd
+import pandas as pd
+from shapely.geometry import Point
 
 # Specify all externally visible functions this file defines
 __all__ = ['make_people', 'make_randpop', 'assign_regions', 'make_random_contacts',
