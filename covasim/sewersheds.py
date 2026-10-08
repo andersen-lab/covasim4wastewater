@@ -1,6 +1,5 @@
 
 import pandas as pd
-import json
 import numpy as np
 from shapely.geometry import Polygon
 from shapely.geometry import Point
