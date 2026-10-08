@@ -86,18 +86,27 @@ def assign_coords(assigned_region_codes, population_data):
 
     xs = []
     ys = []
-    for region in regions:
-        # TODO: Need to implement a way to get the actual coordinates of the region from the population data and assign them to region_data
-        region_data = {'x_min': -180, 'x_max': 180, 'y_min': -90, 'y_max': 90} 
-        if region_data is not None:
-            x_min, x_max = region_data['x_min'], region_data['x_max']
-            y_min, y_max = region_data['y_min'], region_data['y_max']
-            xs.append(np.random.uniform(x_min, x_max))
-            ys.append(np.random.uniform(y_min, y_max))
 
-    if not xs:
-        return np.empty((0, 2))  # Handles the empty regions case cleanly
-        
+    for r_code in assigned_region_codes:
+        if r_code not in pop_indexed.index:
+            # Fallback if region code isn't found
+            xs.append(0.0)
+            ys.append(0.0)
+            continue
+
+        geom = pop_indexed.loc[r_code, "geometry"]
+        minx, miny, maxx, maxy = geom.bounds
+
+        # Uniform rejection sampling inside the assigned polygon
+        # (Guarantees coordinates fall strictly inside the region shape)
+        while True:
+            rx = np.random.uniform(minx, maxx)
+            ry = np.random.uniform(miny, maxy)
+            if geom.contains(Point(rx, ry)):
+                xs.append(rx)
+                ys.append(ry)
+                break
+
     return np.column_stack((xs, ys))
 
 def make_people(sim, popdict=None, die=True, reset=False, recreate=False, verbose=None, **kwargs):
