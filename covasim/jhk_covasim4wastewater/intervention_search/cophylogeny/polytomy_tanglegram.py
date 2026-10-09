@@ -447,5 +447,3 @@ def run_polytomy_tanglegram(nwk1, nwk2):
 
     fig = plot_tanglegram(t1, t2, edges)
     plt.show()
-
-    return fig
