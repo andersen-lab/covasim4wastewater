@@ -17,7 +17,14 @@ What a good result looks like:
 import time                                   # for timing how long the network takes to build
 import numpy as np                            # arrays and maths
 import matplotlib.pyplot as plt               # for the figure at the end
+
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parent.parent / 'src'))
+
 from rank_network import load_density_raster, sample_coords_from_density, lonlat_to_km, make_rank_based_contacts
+
+#from rank_network import load_density_raster, sample_coords_from_density, lonlat_to_km, make_rank_based_contacts
 
 
 # ---------------------------------------------------------------------------
@@ -27,9 +34,9 @@ TIF  = '../data/san_diego_county_ppp_2020.tif'   # raster file: people per ~100 
 BBOX = None                                      # None = read the whole file (it is already clipped to the county)
 #TIF  = '../data/usa_ppp_2020.tif'               # alternative: the whole-US raster (3.8 GB) ...
 #BBOX = (-117.6, 32.53, -116.08, 33.51)          # ... read only this window: lon_min, lat_min, lon_max, lat_max
-N    = 100000 #20000   # number of simulated people (was 5000). Runtime grows with N squared:
+N    = 20000 #100000 #20000   # number of simulated people (was 5000). Runtime grows with N squared:
                # 5,000 = ~1 s, 20,000 = ~20 s, 50,000 = ~2 min
-DEG  = 10      # target average number of friends per person (the actual average comes out a bit lower)
+DEG  = 20 #10      # target average number of friends per person (the actual average comes out a bit lower)
 
 np.random.seed(0)   # fix the random numbers so reruns give the same population and network
 

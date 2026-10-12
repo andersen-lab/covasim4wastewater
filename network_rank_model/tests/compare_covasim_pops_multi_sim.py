@@ -43,6 +43,8 @@ DEG    = 20        #target average friends per person. Changed from 10 to 20 to 
 N_DAYS = 60        # length of the epidemic
 SEED   = 1         # first random seed for the epidemic runs (run r uses SEED + r)
 N_RUNS = 10 #10        # replicate epidemics per network
+N_REAL    = 3_400_000          # real county population (the raster total is about 3.40 million)
+POP_SCALE = N_REAL / N         # each agent stands for this many real people (N = 20,000 gives 170)
 
 np.random.seed(0)  # same people and networks every run
 
@@ -100,6 +102,7 @@ def run_sim(name, edges, seed):
     pars = dict(
         pop_size     = N,
         pop_type     = 'random',           # ignored when a popdict is supplied; kept so validation passes
+        pop_scale = POP_SCALE,
         pop_infected = 2,                 # people infected on day 0
         n_days       = N_DAYS,
         rand_seed    = seed,

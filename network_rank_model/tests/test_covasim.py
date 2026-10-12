@@ -26,8 +26,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import covasim as cv
 from covasim.population import make_random_contacts   # Covasim's own function we are replicating
-from rank_network import load_density_raster, sample_coords_from_density, lonlat_to_km, make_rank_based_contacts
 
+#Scripts import
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parent.parent / 'src'))
+
+from rank_network import load_density_raster, sample_coords_from_density, lonlat_to_km, make_rank_based_contacts
 
 # ---------------------------------------------------------------------------
 # Settings
@@ -115,6 +120,11 @@ def run_sim(name, edges):
 sims = {name: run_sim(name, e) for name, e in layers.items()}
 for name, sim in sims.items():
     print(f'{name:6s}: cumulative infections after {N_DAYS} days = {int(sim.results["cum_infections"][-1]):,} of {N:,}')
+
+    lay = sim.people.contacts['f']
+    deg = np.bincount(np.concatenate([lay['p1'], lay['p2']]), minlength=len(sim.people))
+    print(f'{name:6s}: degree mean {deg.mean():.1f}, std {deg.std():.1f}, max {deg.max()}; '
+          f'beta range {lay["beta"].min()}-{lay["beta"].max()}')
 
 
 # ---------------------------------------------------------------------------
