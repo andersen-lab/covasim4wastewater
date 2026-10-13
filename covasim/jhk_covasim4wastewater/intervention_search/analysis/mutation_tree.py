@@ -11,16 +11,22 @@ import networkx as nx
 from ete3 import Tree
 
 
-def build_mutation_tree(sim, daily_sequenced_agents):
+def build_mutation_tree(sim, daily_sequenced_agents=None):
     """
     Event-based tree: each node is one infection event ("{agent}_{day}"),
     so every event has exactly one parent and the result is a tree.
+
+    daily_sequenced_agents (list of lists, optional): sequenced event IDs per
+    day; if None, all infection events are marked as sequenced.
     """
     infection_log = getattr(sim, "infection_log", None) or getattr(sim.people, "infection_log", None)
     if infection_log is None:
         raise ValueError("Simulation has no infection_log.")
 
-    sequenced_event_ids = {eid for day_list in daily_sequenced_agents for eid in day_list}
+    if daily_sequenced_agents is None:
+        sequenced_event_ids = {f"{entry['target']}_{entry['date']}" for entry in infection_log}
+    else:
+        sequenced_event_ids = {eid for day_list in daily_sequenced_agents for eid in day_list}
 
     G = nx.DiGraph()
     last_event_date = {}
@@ -51,17 +57,23 @@ def build_mutation_tree(sim, daily_sequenced_agents):
     return G
 
 
-def build_infection_seq_tree(sim, daily_sequenced_agents):
+def build_infection_seq_tree(sim, daily_sequenced_agents=None):
     """
     Mutation-collapsed tree: each node is a unique mutation state
     (haplotype); each edge is a mutation event. Tracks, per node, whether
     it (or a descendant) was ever sequenced.
+
+    daily_sequenced_agents (list of lists, optional): sequenced event IDs per
+    day; if None, all infection events are marked as sequenced.
     """
     infection_log = getattr(sim, "infection_log", None) or getattr(sim.people, "infection_log", None)
     if infection_log is None:
         raise ValueError("Simulation has no infection_log.")
 
-    sequenced_event_ids = {eid for day_list in daily_sequenced_agents for eid in day_list}
+    if daily_sequenced_agents is None:
+        sequenced_event_ids = {f"{entry['target']}_{entry['date']}" for entry in infection_log}
+    else:
+        sequenced_event_ids = {eid for day_list in daily_sequenced_agents for eid in day_list}
 
     mutation_nodes = {}
     node_events = {}

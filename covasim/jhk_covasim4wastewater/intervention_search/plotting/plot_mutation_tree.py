@@ -23,8 +23,10 @@ def _maybe_restrict(G, sequenced_only, collapse):
 
 
 def plot_mutation_tree(G, savepath=None, show=True, detection_day=None,
-                        sequenced_only=False, collapse=False):
+                        sequenced_only=False, collapse=False, title=None):
     """Tidy-layout tree; only sequenced nodes are drawn as points."""
+    if title is None:
+        title = "Event-based Infection Tree"
     G = _maybe_restrict(G, sequenced_only, collapse)
 
     pos = graphviz_layout(G, prog="dot")
@@ -42,7 +44,7 @@ def plot_mutation_tree(G, savepath=None, show=True, detection_day=None,
     if seq_xy:
         ax.scatter(*zip(*seq_xy), color="red", s=20, alpha=0.9)
 
-    ax.set_title("Event-based Infection Tree", fontsize=14)
+    ax.set_title(title, fontsize=14)
     ax.axis("off")
     plt.tight_layout()
 
@@ -55,11 +57,13 @@ def plot_mutation_tree(G, savepath=None, show=True, detection_day=None,
 
 
 def plot_erase_mutation_tree(G, savepath=None, show=True, detection_day=None,
-                              erase=True, sequenced_only=False, collapse=False):
+                              erase=True, sequenced_only=False, collapse=False, title=None):
     """
     Same tree, but edges leading to a subtree with no sequenced event are
     either dropped (erase=True) or faded (erase=False).
     """
+    if title is None:
+        title = "Ground Truth Transmission Tree (sequenced = blue)"
     G = _maybe_restrict(G, sequenced_only, collapse)
 
     pos = graphviz_layout(G, prog="dot")
@@ -84,7 +88,7 @@ def plot_erase_mutation_tree(G, savepath=None, show=True, detection_day=None,
     if seq_xy:
         ax.scatter(*zip(*seq_xy), color="blue", s=40, alpha=0.9)
 
-    ax.set_title("Ground Truth Transmission Tree (sequenced = blue)", fontsize=30)
+    ax.set_title(title, fontsize=30)
     if detection_day is not None:
         ax.text(0.5, 1.02, f"Detection day: {detection_day}", transform=ax.transAxes,
                 ha="center", fontsize=11, color="blue")
