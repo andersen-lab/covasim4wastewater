@@ -277,6 +277,7 @@ class LineageSequenceTracker:
     def __init__(self, evo_pars, seed=None):
         self.L    = evo_pars.get('L', 1000)
         self.rate = evo_pars.get('mol_clock_rate', 1e-5)
+        self.bottleneck = evo_pars.get('bottleneck', False)  # Probabilistic transmission bottleneck; see annotate_entry()
 
         ref = evo_pars.get('reference')
         if ref is None:
@@ -329,9 +330,15 @@ class LineageSequenceTracker:
           branch_length      (float): Δt in days
           branch_mutations   (list):  [(site, from_nt_int, to_nt_int), ...]
           n_mutations        (int):   len(branch_mutations)
+          rejected_mutations (list):  mutations dropped by the bottleneck (only when evo_pars['bottleneck'] is True)
 
         Also maintains agent_mutations (relative-to-reference mutation sets) when
         a fitness model or founding mutations are in use.
+
+        Bottleneck (evo_pars['bottleneck'] = True): if the mutated sequence is at
+        least as fit as the source's, it is transmitted. If it is less fit, it is
+        transmitted with probability fitness_target/fitness_source; otherwise the
+        source's sequence is transmitted unchanged (no new mutations).
 
         Call this after infection_log.append(entry) and before
         date_exposed[target] is written for the current infection.
@@ -368,15 +375,30 @@ class LineageSequenceTracker:
             parent_muts = self.agent_mutations.get(source, frozenset()) if _track else None
 
         mutations, child_seq = self.model.evolve_branch(self.rng, parent_seq, delta_t, self.rate)
+        child_muts = _apply_branch_mutations(parent_muts, mutations, self.reference) if _track else None
+
+        # Bottleneck: a less-fit mutated sequence passes with probability fitness_target/fitness_source,
+        # otherwise the source's sequence is transmitted. Seeds and imports (no source) are not affected.
+        rejected = []
+        if self.bottleneck and self.fitness_model is not None and source is not None and mutations:
+            fit_source = self.fitness_model.compute_fitness(parent_muts)
+            fit_target = self.fitness_model.compute_fitness(child_muts)
+            if fit_target < fit_source and self.rng.random() >= fit_target / fit_source:
+                rejected   = mutations
+                mutations  = []
+                child_seq  = parent_seq.copy()
+                child_muts = parent_muts
 
         self._episode_roots[target] = child_seq
 
         if _track:
-            self.agent_mutations[target] = _apply_branch_mutations(parent_muts, mutations, self.reference)
+            self.agent_mutations[target] = child_muts
 
         entry['branch_length']    = delta_t
         entry['branch_mutations'] = mutations
         entry['n_mutations']      = len(mutations)
+        if self.bottleneck:
+            entry['rejected_mutations'] = rejected
 
     def initialize_founder_haplotype(self, agent_idx, variant_label):
         '''

@@ -524,6 +524,8 @@ class Sim(cvb.BaseSim):
                 tracker.fitness_model = cvfit.BloomNtFitnessModel(ep['fitness_data_path'], scale=ep['fitness_scale'])
             else:
                 raise ValueError(f'Unknown fitness model "{model_key}"; choices: bloom_nt, None')
+            if ep.get('bottleneck', False) and tracker.fitness_model is None:
+                raise ValueError('evo_pars["bottleneck"] = True requires a fitness model; set fitness_model="bloom_nt"')
 
             # Extract founding mutations for variants that supply a founding_fasta
             for v in self['variants']:
