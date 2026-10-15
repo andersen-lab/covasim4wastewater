@@ -1,12 +1,49 @@
-# ----------------------------------------------------------------------------
-# Paste these two helper functions into covasim/population.py ABOVE make_rank_based_contacts(),
-# and replace make_rank_based_contacts() with the version below.
-# ----------------------------------------------------------------------------
+'''
+Fast version of the rank-based friendship network (same result as rank_network.py, about 3 times faster on one core,
+and it can use several cores: pass use_workers=True and it chooses how many for this computer (or n_workers=N to choose yourself).
+
+The main function is called make_rank_based_contacts_fast() here, so it cannot be confused with the original
+make_rank_based_contacts() while both are being tested. In covasim/population.py it takes the name make_rank_based_contacts().
+
+This file is for testing next to rank_network.py. In Covasim itself, the same two helper functions and
+make_rank_based_contacts() live in covasim/population.py.
+'''
 import numpy as np
 import covasim.defaults as cvd
 import covasim.utils as cvu
 
-def _pick_ranks(d, ranks):
+
+_SHARED = {} # The coordinates, shared with worker processes that are started by fork (so they are not sent again with every job)
+_MIN_AGENTS_PER_WORKER = 2000 # A rough guide: fewer agents than this per worker and starting the workers costs more than it saves
+_AUTO_MAX_WORKERS = 16 # use_workers=True never picks more than this: on the test server (100,000 agents) efficiency stayed above about 80% up to 16 workers
+
+
+def choose_workers(pop_size, use_workers=False, n_workers=None):
+    '''
+    Helper for make_rank_based_contacts(): how many worker processes to use. One means no parallelism.
+        n_workers given    use that many (-1 = every core this job may use), but never more than the cores available or the
+                           size justifies (about 2,000 agents per worker)
+        use_workers=True   choose automatically: leave one core free, never more than 16 (more cores help less and less),
+                           and only count cores that are not already busy with other work
+        neither            one core
+    '''
+    import os
+    usable = len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else (os.cpu_count() or 1) # Cores this job may really use
+    if n_workers is not None:
+        wanted = usable if n_workers < 0 else int(n_workers)
+    elif use_workers:
+        wanted = usable - 1 if usable > 2 else usable
+        wanted = min(wanted, _AUTO_MAX_WORKERS)
+        try:
+            wanted = min(wanted, int(usable - os.getloadavg()[0])) # Cores already busy with other work are not free
+        except (AttributeError, OSError): # getloadavg does not exist on every platform
+            pass
+    else:
+        wanted = 1
+    return max(1, min(wanted, usable, pop_size//_MIN_AGENTS_PER_WORKER))
+
+
+def pick_ranks(d, ranks):
     '''
     Helper for make_rank_based_contacts(): given the squared distances d from one person to everyone, return who sits
     at each wanted rank (1 = nearest). The largest rank is found first with one partial sort; the smaller ranks are then
@@ -24,7 +61,7 @@ def _pick_ranks(d, ranks):
     return found[inverse]
 
 
-def _friends_for_people(x, y, people, counts, ranks):
+def find_friends(x, y, people, counts, ranks):
     '''
     Helper for make_rank_based_contacts(): for each person in `people`, find the person at each of their wanted ranks.
     ranks holds the wanted ranks of all these people one after another (counts[i] of them for people[i]).
@@ -40,12 +77,20 @@ def _friends_for_people(x, y, people, counts, ranks):
         np.multiply(dy, dy, out=dy)
         np.add(dx, dy, out=dx) # Squared distance from person p to everyone (squared is fine for ordering)
         dx[p] = np.inf # Put self last so it can never be chosen
-        friends[start:start+k] = _pick_ranks(dx, ranks[start:start+k])
+        friends[start:start+k] = pick_ranks(dx, ranks[start:start+k])
         start += k
     return friends
 
 
-def make_rank_based_contacts_fast(coords, n, alpha=1.0, dispersion=None, mapping=None, n_workers=1):
+def friends_job(people, counts, ranks):
+    '''
+    Helper for make_rank_based_contacts(): one job for a worker process. The coordinates come from _SHARED, which the
+    worker inherited when it was forked, so only the small per-job arrays have to be sent to it.
+    '''
+    return find_friends(_SHARED['x'], _SHARED['y'], people, counts, ranks)
+
+
+def make_rank_based_contacts_fast(coords, n, alpha=1.0, dispersion=None, mapping=None, use_workers=False, n_workers=None):
     '''
     Make a rank-based geographic friendship layer as an edgelist.
 
@@ -66,7 +111,10 @@ def make_rank_based_contacts_fast(coords, n, alpha=1.0, dispersion=None, mapping
         dispersion (float) : if not None, use a negative binomial distribution with this
                              dispersion parameter instead of Poisson for friend counts
         mapping    (array) : optionally map the generated indices onto new indices
-        n_workers  (int)   : number of CPU cores to use (1 = no parallelism; None or -1 = all cores).
+        use_workers (bool) : False (the default) uses one core, which works everywhere. True lets the code choose how many
+                             cores to use for this computer and this size (see below).
+        n_workers  (int)   : use this many cores instead (-1 = all the cores this job may use). Overrides use_workers.
+                             Never more than the cores available or about one per 2,000 agents.
                              The result is identical whatever the number of cores.
 
     Returns:
@@ -85,12 +133,14 @@ def make_rank_based_contacts_fast(coords, n, alpha=1.0, dispersion=None, mapping
            This is why the average number of friends comes out slightly below n (about 0.9n to 0.95n).
 
     Notes:
-        - All random numbers are drawn first, in one step, so the result does not depend on n_workers.
+        - use_workers=True picks the number of workers itself: one core left free, at most 16, only cores that are not
+          already busy, and about one worker per 2,000 agents. Below about 4,000 agents it stays on one core. If worker
+          processes cannot be started (for example inside MultiSim) it warns and uses one core.
+        - All random numbers are drawn first, in one step, so the result does not depend on the number of workers.
         - Cost still grows roughly with N^2, because every person's distance to everyone is needed.
           The fast distance step and the nested partial sorts make it about 3 to 4 times faster on one core
           than the first version (measured at 20,000 people); n_workers divides the time by about the
           number of cores used. make_random_contacts() never looks at distances, so its time grows only with N.
-        - Do not use n_workers > 1 when this is already running inside a parallel job (e.g. MultiSim).
     '''
 
     # Preprocessing
@@ -124,25 +174,31 @@ def make_rank_based_contacts_fast(coords, n, alpha=1.0, dispersion=None, mapping
 
     # Find who sits at each chosen rank, on one core or several
     x, y = np.ascontiguousarray(coords[:, 0]), np.ascontiguousarray(coords[:, 1])
-    if n_workers is None or n_workers < 0:
-        import os
-        n_workers = os.cpu_count() or 1
-    if n_workers <= 1 or pop_size < 2000: # Too small to be worth the start-up cost
-        friends = _friends_for_people(x, y, people, counts, ranks)
-    else:
-        from concurrent.futures import ProcessPoolExecutor
+    n_workers = choose_workers(pop_size, use_workers, n_workers) # One core unless asked otherwise
+
+    friends = None
+    if n_workers > 1:
         import multiprocessing as mp
-        ends   = np.cumsum(counts)
-        starts = ends - counts
-        groups = np.array_split(np.arange(len(people)), n_workers*4) # Several small jobs per core keeps all cores busy
-        jobs   = [g for g in groups if len(g)]
-        try:
-            ctx = mp.get_context('fork') # Cheapest on Linux: workers share the coordinates
-        except ValueError: # pragma: no cover
-            ctx = mp.get_context()
-        with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as pool:
-            futures = [pool.submit(_friends_for_people, x, y, people[g], counts[g], ranks[starts[g[0]]:ends[g[-1]]]) for g in jobs]
-            friends = np.concatenate([f.result() for f in futures])
+        if 'fork' in mp.get_all_start_methods(): # Forked workers inherit the coordinates; other platforms use one core
+            from concurrent.futures import ProcessPoolExecutor
+            ctx    = mp.get_context('fork')
+            ends   = np.cumsum(counts)
+            starts = ends - counts
+            groups = np.array_split(np.arange(len(people)), n_workers*4) # Several small jobs per core keeps all cores busy
+            jobs   = [g for g in groups if len(g)]
+            _SHARED['x'], _SHARED['y'] = x, y
+            try:
+                with ProcessPoolExecutor(max_workers=n_workers, mp_context=ctx) as pool:
+                    futures = [pool.submit(friends_job, people[g], counts[g], ranks[starts[g[0]]:ends[g[-1]]]) for g in jobs]
+                    friends = np.concatenate([f.result() for f in futures])
+            except (AssertionError, OSError, RuntimeError) as E: # e.g. already inside a worker process (MultiSim), or not allowed to start processes
+                import warnings
+                warnings.warn(f'Could not start worker processes for the rank network ({E}); using one core instead')
+                friends = None
+            finally:
+                _SHARED.clear()
+    if friends is None: # One core: the default, and the fallback
+        friends = find_friends(x, y, people, counts, ranks)
 
     # Tidy up: merge duplicate pairs (A-B and B-A are the same friendship)
     p1 = np.repeat(people, counts)
