@@ -692,16 +692,18 @@ def make_rank_based_contacts(coords, n, alpha=1.0, dispersion=None, mapping=None
            distances from p to everyone, not a full sort).
         4. Finally, pairs found twice (A-B and B-A, or A-B repeated) are merged into one friendship.
            This is why the average number of friends comes out slightly below n (about 0.9n to 0.95n).
+    
+    Speed Improvements:
+    - Arrays reused: the old code created temporary arrays for every person, whereas the new code allocates two arrays once and reuses them.
+    - Separate x and y arrays: the coordinates are split into one-dimensional arrays rather than one 2D array, making the element-wise calculations more efficient.
+    - Duplicates removed as integers: each friendship is temporarily encoded as a single integer while duplicates are removed (then decoded back, so the output is unchanged), which is faster than comparing rows in a 2D array as in the original.
 
     Notes:
         - use_workers=True picks the number of workers itself: one core left free, at most 16, only cores that are not
           already busy, and about one worker per 2,000 agents. Below about 4,000 agents it stays on one core. If worker
           processes cannot be started (for example inside MultiSim) it warns and uses one core.
         - All random numbers are drawn first, in one step, so the result does not depend on the number of workers.
-        - Cost still grows roughly with N^2, because every person's distance to everyone is needed.
-          The fast distance step and the nested partial sorts make it about 3 to 4 times faster on one core
-          than the first version (measured at 20,000 people); n_workers divides the time by about the
-          number of cores used. make_random_contacts() never looks at distances, so its time grows only with N.
+        - 
     '''
 
     # Preprocessing
@@ -774,3 +776,5 @@ def make_rank_based_contacts(coords, n, alpha=1.0, dispersion=None, mapping=None
 
     output = dict(p1=p1.astype(cvd.default_int), p2=p2.astype(cvd.default_int))
     return output
+
+    
