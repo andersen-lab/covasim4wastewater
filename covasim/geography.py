@@ -50,6 +50,7 @@ load_density_raster(): pip install rasterio
 '''
 
 import numpy as np
+from . import misc as cvm
 
 __all__ = ['load_density_raster', 'sample_coords_from_density', 'sample_coords_within_boundaries', 'assign_regions_from_coords',
            'lonlat_to_km', 'assign_density_based_coords']
@@ -161,7 +162,9 @@ def sample_coords_within_boundaries(raster, boundaries, pop_size, max_tries=100)
 def assign_regions_from_coords(lonlat, boundaries):
     '''
     Give each agent the region_code of the boundary polygon that contains its location.
-    Where polygons overlap, the first one in the file wins.
+    Points on a shared edge count as inside both polygons. Where polygons overlap, an agent in
+    several polygons is assigned to one of them at random (equal probability) and a warning
+    reports how many agents were affected, since regions are normally expected not to overlap.
 
     Args:
         lonlat     (array):        (N, 2) array of longitude, latitude in degrees
@@ -172,14 +175,23 @@ def assign_regions_from_coords(lonlat, boundaries):
     '''
     import shapely
     labels = boundaries['region_code'].to_numpy()
-    index  = np.full(len(lonlat), -1)
-    for i, geom in enumerate(boundaries.geometry.values):
-        unassigned = index < 0
-        hit = shapely.contains_xy(geom, lonlat[unassigned, 0], lonlat[unassigned, 1])
-        index[np.nonzero(unassigned)[0][hit]] = i
-    if (index < 0).any():
-        errormsg = f'{int((index < 0).sum())} agents are outside all boundary polygons'
+    lonlat = np.asarray(lonlat, dtype=float)
+
+    # inside[i, j] is True if agent i is in polygon j
+    inside = np.column_stack([shapely.intersects_xy(geom, lonlat[:, 0], lonlat[:, 1]) for geom in boundaries.geometry.values])
+    n_matches = inside.sum(axis=1)
+    if (n_matches == 0).any():
+        errormsg = f'{int((n_matches == 0).sum())} agents are outside all boundary polygons'
         raise ValueError(errormsg)
+
+    index = inside.argmax(axis=1) # The polygon each agent is in (for the usual case of exactly one)
+    overlap = np.nonzero(n_matches > 1)[0]
+    if len(overlap):
+        # Pick uniformly among the matching polygons: give each a random score and take the highest of those that match
+        scores = np.random.random(inside[overlap].shape)*inside[overlap]
+        index[overlap] = scores.argmax(axis=1)
+        warnmsg = f'{len(overlap)} of {len(lonlat)} agents are in more than one boundary polygon; each was assigned to one of them at random. Check the boundary file for overlapping regions.'
+        cvm.warn(warnmsg)
     return labels[index]
 
 

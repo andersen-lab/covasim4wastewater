@@ -79,6 +79,36 @@ def test_rank_population_density_within_boundaries(tmp_path):
     assert contact_dist < 0.5*np.hypot(p.x - p.x[perm], p.y - p.y[perm]).mean()
 
 
+def test_assign_regions_from_coords():
+    ''' Regions follow the polygon containing each point; edges count; overlaps are random and warned about '''
+    import geopandas as gpd
+    from shapely.geometry import box
+    from covasim.geography import assign_regions_from_coords
+
+    def regions(boxes):
+        return gpd.GeoDataFrame({'region_code': list(range(1, len(boxes)+1))}, geometry=boxes, crs='EPSG:4326')
+
+    with cv.options.context(warnings='ignore'): # A point on a shared edge is in both polygons, which warns
+        pts = np.array([[0.5, 0.5], [1.5, 0.5], [1.0, 0.5]]) # Inside A, inside B, exactly on the shared edge
+        out = assign_regions_from_coords(pts, regions([box(0, 0, 1, 1), box(1, 0, 2, 1)]))
+    assert list(out[:2]) == [1, 2] and out[2] in (1, 2) # The edge point is not rejected
+
+    with pytest.raises(ValueError):
+        assign_regions_from_coords(np.array([[5.0, 5.0]]), regions([box(0, 0, 1, 1)]))
+
+    # Fully overlapping polygons: each agent picks one at random, about half and half
+    overlapping = regions([box(0, 0, 1, 1), box(0, 0, 1, 1)])
+    many = np.full((2000, 2), 0.5)
+    with cv.options.context(warnings='ignore'):
+        out = assign_regions_from_coords(many, overlapping)
+    assert 0.4 < (out == 1).mean() < 0.6
+
+    # ...and the overlap is reported as a warning (or an error, if warnings are set to error)
+    with cv.options.context(warnings='error'):
+        with pytest.raises(RuntimeWarning, match='more than one boundary polygon'):
+            assign_regions_from_coords(many, overlapping)
+
+
 if __name__ == '__main__':
     test_rank_population()
     test_rank_population_workers()
