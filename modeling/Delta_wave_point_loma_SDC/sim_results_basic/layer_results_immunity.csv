@@ -1,0 +1,7 @@
+layer,growth_per_day,peak_week,peak_infections_per_week,peak_diagnoses_per_week,share_infected
+REAL DATA,0.032,8,,5598,
+vacc + prior immunity 0%,0.133,11,401479.0,142968,1.29
+vacc + prior immunity 10%,0.116,12,284667.0,99967,0.97
+vacc + prior immunity 20%,0.094,14,216399.0,74404,0.76
+vacc + prior immunity 30%,0.075,17,135688.0,49814,0.55
+vacc + prior immunity 40%,0.04,22,89979.0,32589,0.23

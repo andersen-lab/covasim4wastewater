@@ -1,0 +1,3 @@
+layer,growth_per_day,peak_week,peak_infections_per_week,peak_diagnoses_per_week,share_infected
+REAL DATA,0.032,8,,5598,
+vacc + beta 0.008,0.032,22,45072.0,10368,0.07
