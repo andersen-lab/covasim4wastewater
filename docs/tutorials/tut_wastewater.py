@@ -9,6 +9,9 @@ import os
 
 os.chdir(os.path.dirname(os.path.abspath(__file__))) # So the relative data paths below resolve
 
+plot_dir = 'tut_outputs' # All plots are saved here as PDFs instead of being shown
+os.makedirs(plot_dir, exist_ok=True)
+
 # %% [markdown]
 # # Covasim for wastewater step by step tutorial
 # 1. To run the following code, first make sure covasim and its dependencies are installed.
@@ -62,7 +65,8 @@ plt.xlabel('time')
 plt.ylabel('agent')
 plt.title('Viral shedding by agent and time')
 plt.tight_layout()
-plt.show()
+plt.savefig(f'{plot_dir}/01_shedding_heatmap.pdf')
+plt.close()
 
 # %% [markdown]
 # We then look at the overall shedding (total for all agents) and the shedding in each sewershed at each time point. This is the signal a wastewater treatment plant would see for its catchment.
@@ -79,32 +83,8 @@ plt.ylabel('Total viral shedding')
 plt.title('Total viral shedding by sewershed')
 plt.legend()
 plt.tight_layout()
-plt.show()
-
-# %% [markdown]
-# The cumulative shedding in each sewershed can also be shown on a map:
-
-# %%
-import geopandas as gpd
-
-sewershed_gdf = gpd.read_file('san-diego-data/sewersheds.geojson')
-# people.sewershed holds integer IDs; sim.sewershed_labels gives {integer ID: original sid}
-id_to_sid = sim.sewershed_labels
-sewershed_gdf['sid_num'] = sewershed_gdf['sid'].map({v: k for k, v in id_to_sid.items()})
-
-agent_total = viral_shedding.sum(axis=1)  # cumulative shedding per agent
-totals = {sid: float(agent_total[sewersheds == sid].sum()) for sid in np.unique(sewersheds)}
-sewershed_gdf['total_viral_shedding'] = sewershed_gdf['sid_num'].map(totals)
-
-fig, ax = plt.subplots(figsize=(8, 8))
-sewershed_gdf.plot(column='total_viral_shedding', cmap='viridis', edgecolor='0.3', legend=True,
-                   legend_kwds={'label': 'Cumulative viral shedding', 'orientation': 'horizontal', 'shrink': 0.7}, ax=ax)
-for _, row in sewershed_gdf.iterrows():
-    c = row.geometry.centroid
-    ax.annotate(row['sewershed_name'], xy=(c.x, c.y), ha='center', fontsize=8, color='white', fontweight='bold')
-ax.set_title('San Diego example: cumulative viral shedding by sewershed')
-ax.set_axis_off()
-plt.show()
+plt.savefig(f'{plot_dir}/02_shedding_by_sewershed.pdf')
+plt.close()
 
 # %% [markdown]
 # ## Genomic simulation
@@ -251,7 +231,8 @@ ax2.set_ylim(0, 1)
 ax2.legend(loc='upper left', framealpha=0.9)
 
 plt.tight_layout()
-plt.show()
+plt.savefig(f'{plot_dir}/03_variants_counts_and_proportions.pdf')
+plt.close()
 
 # %% [markdown]
 # ## Amplicon sequencing snapshot with Bygul
@@ -378,3 +359,92 @@ for day in sample_days:
         smp = dual.get_analyzer(f'ww_sewershed_{s}').samples.get(day)
         row += f' | sewershed {s}: ' + (f'{smp.n_genotypes} haplotypes' if smp else 'no shedders')
     print(row)
+
+# %% [markdown]
+# Both streams can be mapped side by side, each in its own geography. From the same simulation, the left panel shows cumulative diagnosed cases per 1,000 residents (clinical), grouped by the regions in `boundaries.geojson`. The right panel shows cumulative viral shedding (wastewater), grouped by the sewersheds in `sewersheds.geojson`. Both colour scales start at 0.
+
+# %%
+import geopandas as gpd
+
+sewershed_gdf = gpd.read_file('san-diego-data/sewersheds.geojson')
+# people.sewershed holds integer IDs; sim.sewershed_labels gives {integer ID: original sid}
+sewershed_gdf['sid_num'] = sewershed_gdf['sid'].map({sid: i for i, sid in dual.sewershed_labels.items()})
+region_gdf = gpd.read_file('san-diego-data/boundaries.geojson')
+region_gdf['region_num'] = region_gdf['region_code'].astype(int) # people.region holds the integer region codes
+
+people = dual.people
+shedding_by_agent = dual.results['viral_shedding_hist'].sum(axis=1) # Cumulative shedding per agent
+diagnosed = ~np.isnan(people.date_diagnosed) # Everyone who was ever diagnosed
+
+# Wastewater: total shedding per sewershed
+for sid in sewershed_gdf['sid_num']:
+    sewershed_gdf.loc[sewershed_gdf['sid_num'] == sid, 'total_viral_shedding'] = shedding_by_agent[people.sewershed == sid].sum()
+sewershed_gdf['label'] = sewershed_gdf['sewershed_name']
+
+# Clinical: diagnosed cases per region
+for code in region_gdf['region_num']:
+    in_region = people.region == code
+    row = region_gdf['region_num'] == code
+    region_gdf.loc[row, 'cases'] = diagnosed[in_region].sum()
+    region_gdf.loc[row, 'cases_per_1000'] = 1000*diagnosed[in_region].sum()/in_region.sum()
+region_gdf['label'] = region_gdf['region_name'] + '\n' + region_gdf['cases'].astype(int).astype(str) + ' cases'
+
+fig, (ax_cl, ax_ww) = plt.subplots(1, 2, figsize=(14, 7))
+panels = [(ax_cl, region_gdf, 'cases_per_1000', 'Cumulative diagnosed cases per 1,000 residents', 'Clinical: by region'),
+          (ax_ww, sewershed_gdf, 'total_viral_shedding', 'Cumulative viral shedding', 'Wastewater: by sewershed')]
+for ax, gdf, column, label, title in panels:
+    gdf.plot(column=column, cmap='YlOrRd', vmin=0, edgecolor='0.3', legend=True,
+             legend_kwds={'label': label, 'orientation': 'horizontal', 'shrink': 0.7}, ax=ax)
+    for _, row in gdf.iterrows():
+        c = row.geometry.centroid
+        dark = row[column] > 0.5*gdf[column].max() # White text on dark cells, black on light ones
+        ax.annotate(row['label'], xy=(c.x, c.y), ha='center', fontsize=7, fontweight='bold', color='white' if dark else 'black')
+    ax.set_title(title)
+    ax.set_axis_off()
+plt.tight_layout()
+plt.savefig(f'{plot_dir}/04_clinical_vs_wastewater_map.pdf')
+plt.close()
+
+# %% [markdown]
+# Finally, the same two surveillance modalities over time, with clinical (diagnoses, by region) on the left and wastewater (shedding, by sewershed) on the right. Each frame is one day, using 7-day means. The colour scales are fixed across frames so changes over time are visible.
+
+# %%
+import pandas as pd
+from matplotlib.animation import FuncAnimation, PillowWriter
+
+# Daily values, with rows in the same order as the polygons in each file:
+# new diagnoses per 1,000 residents per region (clinical) and total shedding per sewershed (wastewater)
+n_days = dual.npts
+shedding_hist = dual.results['viral_shedding_hist']
+clinical_ts = np.zeros((len(region_gdf), n_days))
+wastewater_ts = np.zeros((len(sewershed_gdf), n_days))
+for k, code in enumerate(region_gdf['region_num']):
+    in_region = people.region == code
+    diag_days = people.date_diagnosed[in_region & diagnosed].astype(int)
+    clinical_ts[k] = 1000*np.bincount(diag_days[diag_days < n_days], minlength=n_days)/in_region.sum()
+for k, sid in enumerate(sewershed_gdf['sid_num']):
+    wastewater_ts[k] = shedding_hist[people.sewershed == sid].sum(axis=0)
+
+def smooth(ts):
+    return pd.DataFrame(ts.T).rolling(7, min_periods=1).mean().to_numpy().T # 7-day trailing mean
+
+clinical_ts, wastewater_ts = smooth(clinical_ts), smooth(wastewater_ts)
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 6.5))
+panels = [(axes[0], region_gdf, clinical_ts, 'Clinical (by region)', 'New diagnoses per 1,000 residents'),
+          (axes[1], sewershed_gdf, wastewater_ts, 'Wastewater (by sewershed)', 'Total viral shedding')]
+for ax, gdf, ts, title, label in panels:
+    gdf['value'] = ts[:, 0]
+    gdf.plot(column='value', cmap='YlOrRd', vmin=0, vmax=ts.max(), edgecolor='0.3', ax=ax)
+    fig.colorbar(plt.cm.ScalarMappable(norm=plt.Normalize(0, ts.max()), cmap='YlOrRd'), ax=ax, orientation='horizontal', shrink=0.7, label=label)
+    ax.set_title(title)
+    ax.set_axis_off()
+
+def update(day):
+    for ax, gdf, ts, title, label in panels:
+        ax.collections[0].set_array(ts[:, day])
+    fig.suptitle(f'Day {day} ({dual.date(day)})')
+
+animation = FuncAnimation(fig, update, frames=n_days)
+animation.save(f'{plot_dir}/05_clinical_vs_wastewater_over_time.gif', writer=PillowWriter(fps=10))
+plt.close()

@@ -150,3 +150,6 @@ population_data.csv
 
 # Output of the wastewater tutorial (Bygul simulated reads)
 amplicon_reads/
+
+# PDF plots saved by the wastewater tutorial script
+tut_outputs/
