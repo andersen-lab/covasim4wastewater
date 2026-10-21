@@ -5,8 +5,9 @@ using a CSV that assigns each ZIP to a plant. ZIPs missing from the CSV are trea
 as unassigned (outside the sewersheds); ZIPs in the CSV with no polygon are reported.
 
 Writes to --outdir (default: this folder):
-  sandiego_zip_boundaries.geojson   one polygon per ZIP, with its sewershed
-  sandiego_sewersheds.geojson       one polygon per treatment plant
+  sandiego_zip_boundaries.geojson   one polygon per ZIP, with its sewershed; region_code/region_name are the
+                                    columns covasim's boundary_shapefile reads (there is no population column)
+  sandiego_sewersheds.geojson       one polygon per treatment plant; sid is the column covasim's sewershed_file reads
   sandiego_zip_to_sewershed.csv     zip, community, sewershed
 and sandiego_sewersheds.{pdf,png}.
 
@@ -109,8 +110,11 @@ def main():
     print(f'{len(unassigned)} ZIP polygons not in the catchment CSV (left unassigned)')
 
     zips = zips.merge(catch, on='zip', how='left')
+    zips['region_code'] = zips['zip'] # Columns covasim's boundary_shapefile needs
+    zips['region_name'] = zips['community']
     sewersheds = zips.dropna(subset=['sewershed']).dissolve(by='sewershed', as_index=False)[['sewershed', 'geometry']]
     sewersheds['geometry'] = sewersheds.geometry.apply(clean_sewershed)
+    sewersheds['sid'] = sewersheds['sewershed'] # Column covasim's sewershed_file needs; covasim numbers the sewersheds in file order and keeps these names in sim.sewershed_labels
     sewersheds['n_zips'] = sewersheds['sewershed'].map(zips.groupby('sewershed').size())
 
     zips.to_file(args.outdir / 'sandiego_zip_boundaries.geojson', driver='GeoJSON')

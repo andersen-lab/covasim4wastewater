@@ -31,7 +31,6 @@ def load_population_regions(filename):
     required = {
         "region_code",
         "region_name",
-        "population",
     }
 
     missing = required - set(regions.columns)
@@ -44,25 +43,34 @@ def load_population_regions(filename):
     if regions.empty:
         raise ValueError("Population boundary file contains no regions.")
 
-    regions["population"] = pd.to_numeric(
-        regions["population"],
-        errors="raise",
-    )
-
-    if (regions["population"] < 0).any():
-        raise ValueError("Population cannot be negative.")
-
-    total_population = regions["population"].sum()
-
-    if total_population <= 0:
-        raise ValueError("Total population must be greater than zero.")
-
     if regions.crs is not None and not regions.crs.equals("EPSG:4326"): # Agent coordinates are longitude/latitude
         regions = regions.to_crs("EPSG:4326")
 
-    regions["probability"] = (
-        regions["population"] / total_population
-    )
+    if "population" in regions.columns:
+        regions["population"] = pd.to_numeric(
+            regions["population"],
+            errors="raise",
+        )
+
+        if (regions["population"] < 0).any():
+            raise ValueError("Population cannot be negative.")
+
+        total_population = regions["population"].sum()
+
+        if total_population <= 0:
+            raise ValueError("Total population must be greater than zero.")
+
+        regions["probability"] = (
+            regions["population"] / total_population
+        )
+    else: # No population data: spread people evenly over the area, i.e. weight each region by its area
+        cvm.warn(
+            'The boundary file has no "population" column, so regions are weighted by their area. '
+            'Add a "population" column to weight by population (it is not needed when pop_type="rank" uses a density_raster).'
+        )
+        geometry = regions.geometry if regions.crs is not None else regions.geometry.set_crs("EPSG:4326")
+        area = geometry.to_crs("EPSG:6933").area # An equal-area projection, so areas are comparable
+        regions["probability"] = area / area.sum()
 
     return regions
 

@@ -17,10 +17,11 @@ os.makedirs(plot_dir, exist_ok=True)
 # 1. To run the following code, first make sure covasim and its dependencies are installed.
 # Please follow the instructions here https://github.com/andersen-lab/covasim4wastewater to install.
 # (Full covasim tutorial available at : https://docs.covasim.org/tutorials/)
-# 2. To start, we run a basic simulation: 20,000 people with 20 initial infections for 100 days. The contact network is "hybrid", meaning people interact at workplaces, schools, households and also randomly. There are no imported cases.
-# 3. People are placed on a map using the example San Diego files in `san-diego-data/`:
-#    * `boundaries.geojson` — regions, each with `region_code`, `region_name` and `population` (used to assign people to regions and to draw their home coordinates).
-#    * `sewersheds.geojson` — catchment polygons, each with a `sid` property. Each person is assigned the sewershed containing their home.
+# 2. To start, we run a basic simulation: 20,000 people with 20 initial infections for 100 days. The contact network is "rank", meaning people mostly contact others who live near them: the chance of a contact falls with how many people live closer (the nearest person has rank 1). People are placed using a population-density raster, so they cluster where people actually live. There are no imported cases.
+# 3. People are placed on a map using the San Diego files in `san-diego-data/` (built from ZIP-code polygons and a ZIP-to-treatment-plant table by `make_sewershed_map.py`):
+#    * `sandiego_zip_boundaries.geojson` — one region per ZIP code, with `region_code` and `region_name`. People are assigned to regions and given home coordinates inside them. An optional `population` column weights the regions by population; this file has none, so regions are weighted by area (and covasim warns about it).
+#    * `sandiego_sewersheds.geojson` — one catchment polygon per treatment plant, with a `sid` property (the plant name). Each person is assigned the sewershed containing their home; people outside every sewershed get -1.
+#    * `san_diego_county_ppp_2020.tif` — WorldPop 2020 people per ~100 m pixel (EPSG:4326), passed as `density_raster`. Agents are placed in proportion to this raster, but only inside the region polygons. Make it with `clip_worldpop.py`.
 #
 #    Both are optional (`boundary_shapefile=None`, `sewershed_file=None` by default, giving one region and one catchment). Supply your own files in the same format to model a different place.
 #
@@ -33,12 +34,13 @@ import matplotlib.pyplot as plt
 
 sim = cv.Sim(
     pop_size=20_000,
-    pop_type='hybrid',
+    pop_type='rank',
+    density_raster='san-diego-data/san_diego_county_ppp_2020.tif',
     pop_infected=20,
     n_days=100,
     n_imports=0,
-    boundary_shapefile='san-diego-data/boundaries.geojson',
-    sewershed_file='san-diego-data/sewersheds.geojson',
+    boundary_shapefile='san-diego-data/sandiego_zip_boundaries.geojson',
+    sewershed_file='san-diego-data/sandiego_sewersheds.geojson',
 )
 sim.run()
 
@@ -50,12 +52,12 @@ sim.run()
 #
 # For each individual, the full `pop_size × n_days` shedding matrix is stored in `sim.results['viral_shedding_hist']`
 # (memory grows with population × days, so keep this in mind for very large runs).
-# The following plot shows how much each agent is shedding (cell color) over the simulation (x axis time, y axis agent).
+# The following plot shows how much each of the first 100 agents is shedding (cell color) over the simulation (x axis time, y axis agent).
 
 # %%
 viral_shedding = sim.results['viral_shedding_hist']
 im = plt.imshow(
-    viral_shedding,
+    viral_shedding[:100],  # first 100 agents only
     aspect='auto',   # prevents squashing
     origin='lower',  # agent 0 at bottom
     cmap='viridis',
@@ -63,7 +65,7 @@ im = plt.imshow(
 plt.colorbar(im, label='Viral shedding')
 plt.xlabel('time')
 plt.ylabel('agent')
-plt.title('Viral shedding by agent and time')
+plt.title('Viral shedding by agent and time (first 100 agents)')
 plt.tight_layout()
 plt.savefig(f'{plot_dir}/01_shedding_heatmap.pdf')
 plt.close()
@@ -76,7 +78,8 @@ sewersheds = np.asarray(sim.people.sewershed)
 plt.figure(figsize=(12, 6))
 for sid in np.unique(sewersheds):
     mask = sewersheds == sid
-    plt.plot(viral_shedding[mask].sum(axis=0), label=f'Sewershed {sid} ({mask.sum()} people)')
+    name = sim.sewershed_labels.get(sid, 'Outside all sewersheds') # IDs of sewersheds in the file -> names; 0 and -1 are not in the file
+    plt.plot(viral_shedding[mask].sum(axis=0), label=f'{name} ({mask.sum()} people)')
 plt.plot(viral_shedding.sum(axis=0), linewidth=2, color='red', label='Total')
 plt.xlabel('Day')
 plt.ylabel('Total viral shedding')
@@ -339,10 +342,12 @@ dual = cv.Sim(
         pop_size     = 20_000,
         pop_infected = 20,
         n_days       = 100,
+        pop_type     = 'rank',
+        density_raster = 'san-diego-data/san_diego_county_ppp_2020.tif',
         evo_pars     = dict(enable=True, reference=ref_fasta, mol_clock_rate=1e-6,
                             fitness_model='bloom_nt', fitness_data_path=fitness_data_path, fitness_scale=0.05),
-        boundary_shapefile = 'san-diego-data/boundaries.geojson',
-        sewershed_file     = 'san-diego-data/sewersheds.geojson',
+        boundary_shapefile = 'san-diego-data/sandiego_zip_boundaries.geojson',
+        sewershed_file     = 'san-diego-data/sandiego_sewersheds.geojson',
     ),
     variants      = [ay4],
     interventions = [cv.test_prob(symp_prob=0.2, start_day=0)],
@@ -361,90 +366,172 @@ for day in sample_days:
     print(row)
 
 # %% [markdown]
-# Both streams can be mapped side by side, each in its own geography. From the same simulation, the left panel shows cumulative diagnosed cases per 1,000 residents (clinical), grouped by the regions in `boundaries.geojson`. The right panel shows cumulative viral shedding (wastewater), grouped by the sewersheds in `sewersheds.geojson`. Both colour scales start at 0.
+# Both streams can be mapped side by side, each in its own geography. From the same simulation, the left panel shows cumulative diagnosed cases per 1,000 residents (clinical), grouped by the ZIP codes in `sandiego_zip_boundaries.geojson`. The right panel shows cumulative viral shedding per capita (wastewater), i.e. per resident, grouped by the sewersheds in `sandiego_sewersheds.geojson` (ZIP codes outside every sewershed are not counted). Both colour scales start at 0.
 
 # %%
 import geopandas as gpd
 
-sewershed_gdf = gpd.read_file('san-diego-data/sewersheds.geojson')
+sewershed_gdf = gpd.read_file('san-diego-data/sandiego_sewersheds.geojson')
 # people.sewershed holds integer IDs; sim.sewershed_labels gives {integer ID: original sid}
 sewershed_gdf['sid_num'] = sewershed_gdf['sid'].map({sid: i for i, sid in dual.sewershed_labels.items()})
-region_gdf = gpd.read_file('san-diego-data/boundaries.geojson')
+region_gdf = gpd.read_file('san-diego-data/sandiego_zip_boundaries.geojson')
 region_gdf['region_num'] = region_gdf['region_code'].astype(int) # people.region holds the integer region codes
+
+from matplotlib.patches import Patch
+outline = gpd.GeoSeries([region_gdf.union_all()], crs=region_gdf.crs) # The whole area covered by the boundary file
+
+def add_unmonitored_outline(ax):
+    '''Hatch the whole area, beneath the sewersheds, so the areas that are not monitored by wastewater stand out'''
+    outline.plot(ax=ax, facecolor='white', edgecolor='0.6', hatch='///', linewidth=0.8, zorder=0)
+    ax.legend(handles=[Patch(facecolor='white', edgecolor='0.6', hatch='///', label='Not in a sewershed')], loc='upper left', bbox_to_anchor=(0, 0.02), frameon=False, fontsize=8)
 
 people = dual.people
 shedding_by_agent = dual.results['viral_shedding_hist'].sum(axis=1) # Cumulative shedding per agent
 diagnosed = ~np.isnan(people.date_diagnosed) # Everyone who was ever diagnosed
 
-# Wastewater: total shedding per sewershed
+# Wastewater: cumulative shedding per capita (per resident) in each sewershed
 for sid in sewershed_gdf['sid_num']:
-    sewershed_gdf.loc[sewershed_gdf['sid_num'] == sid, 'total_viral_shedding'] = shedding_by_agent[people.sewershed == sid].sum()
-sewershed_gdf['label'] = sewershed_gdf['sewershed_name']
+    sewershed_gdf.loc[sewershed_gdf['sid_num'] == sid, 'shedding_per_capita'] = shedding_by_agent[people.sewershed == sid].mean()
+sewershed_gdf['label'] = sewershed_gdf['sid'] # Plant name
 
 # Clinical: diagnosed cases per region
 for code in region_gdf['region_num']:
     in_region = people.region == code
     row = region_gdf['region_num'] == code
     region_gdf.loc[row, 'cases'] = diagnosed[in_region].sum()
-    region_gdf.loc[row, 'cases_per_1000'] = 1000*diagnosed[in_region].sum()/in_region.sum()
-region_gdf['label'] = region_gdf['region_name'] + '\n' + region_gdf['cases'].astype(int).astype(str) + ' cases'
+    region_gdf.loc[row, 'cases_per_1000'] = 1000*diagnosed[in_region].sum()/in_region.sum() if in_region.any() else np.nan # ZIPs with nobody in the simulation are left blank
 
 fig, (ax_cl, ax_ww) = plt.subplots(1, 2, figsize=(14, 7))
-panels = [(ax_cl, region_gdf, 'cases_per_1000', 'Cumulative diagnosed cases per 1,000 residents', 'Clinical: by region'),
-          (ax_ww, sewershed_gdf, 'total_viral_shedding', 'Cumulative viral shedding', 'Wastewater: by sewershed')]
+panels = [(ax_cl, region_gdf, 'cases_per_1000', 'Cumulative diagnosed cases per 1,000 residents', 'Clinical: by ZIP code'),
+          (ax_ww, sewershed_gdf, 'shedding_per_capita', 'Cumulative viral shedding per capita', 'Wastewater: by sewershed')]
 for ax, gdf, column, label, title in panels:
     gdf.plot(column=column, cmap='YlOrRd', vmin=0, edgecolor='0.3', legend=True,
              legend_kwds={'label': label, 'orientation': 'horizontal', 'shrink': 0.7}, ax=ax)
-    for _, row in gdf.iterrows():
-        c = row.geometry.centroid
-        dark = row[column] > 0.5*gdf[column].max() # White text on dark cells, black on light ones
-        ax.annotate(row['label'], xy=(c.x, c.y), ha='center', fontsize=7, fontweight='bold', color='white' if dark else 'black')
+    if 'label' in gdf.columns: # Label the few sewersheds; there are too many ZIP codes to label
+        for _, row in gdf.iterrows():
+            c = row.geometry.centroid
+            dark = row[column] > 0.5*gdf[column].max() # White text on dark cells, black on light ones
+            ax.annotate(row['label'], xy=(c.x, c.y), ha='center', fontsize=7, fontweight='bold', color='white' if dark else 'black')
     ax.set_title(title)
     ax.set_axis_off()
+add_unmonitored_outline(ax_ww)
 plt.tight_layout()
 plt.savefig(f'{plot_dir}/04_clinical_vs_wastewater_map.pdf')
 plt.close()
 
 # %% [markdown]
-# Finally, the same two surveillance modalities over time, with clinical (diagnoses, by region) on the left and wastewater (shedding, by sewershed) on the right. Each frame is one day, using 7-day means. The colour scales are fixed across frames so changes over time are visible.
+# Finally, the two surveillance modalities over time. For this animation we use a smaller simulation of 1,000 agents so that every agent can be drawn. The left panel shows each agent at their home location, coloured by their current viral load (grey = not infectious). The middle panel shows clinical data (new diagnoses by region) and the right panel wastewater (viral shedding per capita by sewershed). Each frame is one day, with 7-day means for the two maps. The colour scales are fixed across frames so changes over time are visible.
 
 # %%
 import pandas as pd
-from matplotlib.animation import FuncAnimation, PillowWriter
+from matplotlib.colors import Normalize
+from PIL import Image
+
+class RecordViralLoad(cv.Analyzer):
+    '''Save every agent's viral load (relative transmissibility, 0 if not infectious) on every day'''
+
+    def initialize(self, sim):
+        super().initialize(sim)
+        self.viral_load = np.zeros((sim['pop_size'], sim.npts))
+
+    def apply(self, sim):
+        self.viral_load[:, sim.t] = sim.people.viral_load
+
+# A small simulation (1,000 agents) with the same boundaries, sewersheds and testing
+small = cv.Sim(
+    pop_size           = 1000,
+    pop_infected       = 20,
+    n_days             = 100,
+    pop_type           = 'rank',
+    density_raster     = 'san-diego-data/san_diego_county_ppp_2020.tif',
+    boundary_shapefile = 'san-diego-data/sandiego_zip_boundaries.geojson',
+    sewershed_file     = 'san-diego-data/sandiego_sewersheds.geojson',
+    interventions      = [cv.test_prob(symp_prob=0.2, start_day=0)],
+    analyzers          = [RecordViralLoad(label='viral_load')],
+    verbose            = 0,
+)
+small.run()
+viral_load_hist = small.get_analyzer('viral_load').viral_load # (n_agents, n_days)
+small_people = small.people
+small_diagnosed = ~np.isnan(small_people.date_diagnosed)
+n_days = small.npts
+shedding_hist = small.results['viral_shedding_hist'] # (n_agents, n_days)
 
 # Daily values, with rows in the same order as the polygons in each file:
-# new diagnoses per 1,000 residents per region (clinical) and total shedding per sewershed (wastewater)
-n_days = dual.npts
-shedding_hist = dual.results['viral_shedding_hist']
+# new diagnoses per 1,000 residents per region (clinical) and shedding per capita per sewershed (wastewater)
 clinical_ts = np.zeros((len(region_gdf), n_days))
 wastewater_ts = np.zeros((len(sewershed_gdf), n_days))
 for k, code in enumerate(region_gdf['region_num']):
-    in_region = people.region == code
-    diag_days = people.date_diagnosed[in_region & diagnosed].astype(int)
-    clinical_ts[k] = 1000*np.bincount(diag_days[diag_days < n_days], minlength=n_days)/in_region.sum()
+    in_region = small_people.region == code
+    diag_days = small_people.date_diagnosed[in_region & small_diagnosed].astype(int)
+    clinical_ts[k] = 1000*np.bincount(diag_days[diag_days < n_days], minlength=n_days)/in_region.sum() if in_region.any() else np.nan # ZIPs with nobody in the simulation are left blank
 for k, sid in enumerate(sewershed_gdf['sid_num']):
-    wastewater_ts[k] = shedding_hist[people.sewershed == sid].sum(axis=0)
+    wastewater_ts[k] = shedding_hist[small_people.sewershed == sid].mean(axis=0)
 
 def smooth(ts):
     return pd.DataFrame(ts.T).rolling(7, min_periods=1).mean().to_numpy().T # 7-day trailing mean
 
 clinical_ts, wastewater_ts = smooth(clinical_ts), smooth(wastewater_ts)
 
-fig, axes = plt.subplots(1, 2, figsize=(12, 6.5))
-panels = [(axes[0], region_gdf, clinical_ts, 'Clinical (by region)', 'New diagnoses per 1,000 residents'),
-          (axes[1], sewershed_gdf, wastewater_ts, 'Wastewater (by sewershed)', 'Total viral shedding')]
+# Agent colours: viral load is 0 for anyone who is not infectious, who are drawn grey. They are a separate scatter below
+# (lower zorder) the infectious agents, and below the map lines (zorder 1: grey agents, 2: ZIP outlines, 3: infectious agents).
+agent_cmap = plt.get_cmap('RdPu')
+agent_norm = Normalize(vmin=0, vmax=viral_load_hist.max())
+agent_xy = np.column_stack((small_people.x, small_people.y))
+
+def agents_on_day(day):
+    ''' Locations of the non-infectious agents, and locations and viral loads of the infectious ones '''
+    load = viral_load_hist[:, day]
+    infectious = load > 0
+    return agent_xy[~infectious], agent_xy[infectious], load[infectious]
+
+fig, (ax_agents, ax_clinical, ax_wastewater) = plt.subplots(1, 3, figsize=(15, 5.5))
+fig.subplots_adjust(left=0.01, right=0.99, bottom=0.02, top=0.9, wspace=0.02) # Tight spacing between the three maps
+region_gdf.boundary.plot(ax=ax_agents, color='0.5', linewidth=1, zorder=2) # ZIP code outlines for context
+not_infectious, infectious_xy, infectious_load = agents_on_day(0)
+grey_scatter = ax_agents.scatter(not_infectious[:, 0], not_infectious[:, 1], color='lightgrey', s=12, zorder=1)
+agent_scatter = ax_agents.scatter(infectious_xy[:, 0], infectious_xy[:, 1], c=infectious_load, cmap=agent_cmap, norm=agent_norm, s=12, zorder=3)
+fig.colorbar(agent_scatter, ax=ax_agents, orientation='horizontal', shrink=0.7, label='Viral load (relative transmissibility)')
+ax_agents.set_title('Agents')
+ax_agents.set_axis_off()
+
+panels = [(ax_clinical, region_gdf, clinical_ts, 'Clinical (by ZIP code)', 'New diagnoses per 1,000 residents'),
+          (ax_wastewater, sewershed_gdf, wastewater_ts, 'Wastewater (by sewershed)', 'Viral shedding per capita')]
 for ax, gdf, ts, title, label in panels:
-    gdf['value'] = ts[:, 0]
-    gdf.plot(column='value', cmap='YlOrRd', vmin=0, vmax=ts.max(), edgecolor='0.3', ax=ax)
-    fig.colorbar(plt.cm.ScalarMappable(norm=plt.Normalize(0, ts.max()), cmap='YlOrRd'), ax=ax, orientation='horizontal', shrink=0.7, label=label)
+    gdf['value'] = np.nan_to_num(ts[:, 0]) # Plot without gaps so every polygon is in one collection; blanks come from NaN in the later frames
+    gdf.plot(column='value', cmap='YlOrRd', vmin=0, vmax=np.nanmax(ts), edgecolor='0.3', ax=ax)
+    fig.colorbar(plt.cm.ScalarMappable(norm=plt.Normalize(0, np.nanmax(ts)), cmap='YlOrRd'), ax=ax, orientation='horizontal', shrink=0.7, label=label)
     ax.set_title(title)
     ax.set_axis_off()
 
+add_unmonitored_outline(ax_wastewater) # Added after the sewersheds, which the animation updates through ax.collections[0]
+xmin, ymin, xmax, ymax = region_gdf.total_bounds # The same map extent in every panel, so the panels line up
+for ax in (ax_agents, ax_clinical, ax_wastewater):
+    ax.set_xlim(xmin, xmax)
+    ax.set_ylim(ymin, ymax)
+
 def update(day):
+    not_infectious, infectious_xy, infectious_load = agents_on_day(day)
+    grey_scatter.set_offsets(not_infectious)
+    agent_scatter.set_offsets(infectious_xy)
+    agent_scatter.set_array(infectious_load)
     for ax, gdf, ts, title, label in panels:
         ax.collections[0].set_array(ts[:, day])
-    fig.suptitle(f'Day {day} ({dual.date(day)})')
+    fig.suptitle(f'Day {day}')
 
-animation = FuncAnimation(fig, update, frames=n_days)
-animation.save(f'{plot_dir}/05_clinical_vs_wastewater_over_time.gif', writer=PillowWriter(fps=10))
+# Draw every frame, then save one GIF that uses a single colour palette for all of them. (Matplotlib's PillowWriter builds a
+# new 256-colour palette for each frame, which makes the colorbar gradients shift slightly from frame to frame.)
+frames = []
+for day in range(n_days):
+    update(day)
+    fig.canvas.draw()
+    frames.append(Image.fromarray(np.asarray(fig.canvas.buffer_rgba())[..., :3].copy()))
 plt.close()
+
+sample = frames[::5] # The palette is built from a stack of every 5th frame
+stack = Image.new('RGB', (sample[0].width, sample[0].height*len(sample)))
+for i, frame in enumerate(sample):
+    stack.paste(frame, (0, i*frame.height))
+palette = stack.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
+frames = [frame.quantize(palette=palette, dither=Image.Dither.NONE) for frame in frames]
+frames[0].save(f'{plot_dir}/05_clinical_vs_wastewater_over_time.gif', save_all=True, append_images=frames[1:], duration=100, loop=0)
