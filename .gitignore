@@ -152,4 +152,4 @@ population_data.csv
 amplicon_reads/
 
 # PDF plots saved by the wastewater tutorial script
-tut_outputs/
+# tut_outputs/

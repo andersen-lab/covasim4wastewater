@@ -519,19 +519,174 @@ def update(day):
         ax.collections[0].set_array(ts[:, day])
     fig.suptitle(f'Day {day}')
 
-# Draw every frame, then save one GIF that uses a single colour palette for all of them. (Matplotlib's PillowWriter builds a
-# new 256-colour palette for each frame, which makes the colorbar gradients shift slightly from frame to frame.)
-frames = []
-for day in range(n_days):
-    update(day)
-    fig.canvas.draw()
-    frames.append(Image.fromarray(np.asarray(fig.canvas.buffer_rgba())[..., :3].copy()))
+def save_gif(fig, update, n_frames, path, duration=100):
+    '''
+    Draw every frame (update(i) redraws frame i), then save one GIF that uses a single colour palette for all of them.
+    (Matplotlib's PillowWriter builds a new 256-colour palette for each frame, which makes colours shift slightly between frames.)
+    '''
+    frames = []
+    for i in range(n_frames):
+        update(i)
+        fig.canvas.draw()
+        frames.append(Image.fromarray(np.asarray(fig.canvas.buffer_rgba())[..., :3].copy()))
+    plt.close(fig)
+
+    sample = frames[::5] # The palette is built from a stack of every 5th frame
+    stack = Image.new('RGB', (sample[0].width, sample[0].height*len(sample)))
+    for i, frame in enumerate(sample):
+        stack.paste(frame, (0, i*frame.height))
+    palette = stack.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
+    frames = [frame.quantize(palette=palette, dither=Image.Dither.NONE) for frame in frames]
+    frames[0].save(path, save_all=True, append_images=frames[1:], duration=duration, loop=0)
+
+save_gif(fig, update, n_days, f'{plot_dir}/05_clinical_vs_wastewater_over_time.gif')
+
+# %% [markdown]
+# ## Phylogeny from the transmission tree
+#
+# Covasim records who infected whom in `sim.people.infection_log`. With sequence evolution on, each entry also stores the mutations that arose along that transmission (`n_mutations`), so the transmission tree doubles as a phylogeny of the virus. Here we draw it with [baltic](https://github.com/evogytis/baltic), for a small outbreak of 1,000 agents. It starts from 3 wild-type infections, and AY.4 arrives later, on day 30, as 3 imports.
+#
+# * Every infection is a node, joined to the infection of its source that was active on that day. People can be infected more than once, so each reinfection is its own node.
+# * Every infected person is a tip. A tip starts when the person was infected and ends when they recovered or died (or on the day we look at the outbreak, if they are still infected), so its length is how long they were infected. People who infected others have those infections branching off at the day they were infected.
+# * Branches are coloured by variant. Grey branches are ancestors of more than one variant, which is only the root where the separate seed infections join.
+
+# %%
+import collections
+import baltic as bt
+from matplotlib.lines import Line2D
+
+# A small outbreak: 3 wild-type infections on day 0, then AY.4 arrives on day 30 as 3 imports
+ay4_day = 30
+tree_ay4 = cv.variant(label='AY.4', days=ay4_day, n_imports=3, founding_fasta=ay4_fasta)
+outbreak = cv.Sim(
+    pop_size     = 1000,
+    pop_infected = 3,
+    n_days       = 100,
+    rand_seed    = 3,
+    evo_pars     = dict(enable=True, reference=ref_fasta, mol_clock_rate=1e-6,
+                        fitness_model='bloom_nt', fitness_data_path=fitness_data_path, fitness_scale=0.05),
+    variants     = [tree_ay4],
+    verbose      = 0,
+)
+outbreak.run()
+log = outbreak.people.infection_log
+n_days = outbreak.npts
+
+# Each infection_log entry is one infection. Find the infection of the source that was active on a given day
+infections = collections.defaultdict(list) # agent -> [(date, index in log)], oldest first
+for k, entry in enumerate(log):
+    infections[int(entry['target'])].append((entry['date'], k))
+
+def active_infection(agent, day):
+    return [k for date, k in infections[agent] if date <= day][-1]
+
+parent = [None if e['source'] is None else active_infection(int(e['source']), e['date']) for e in log]
+date = np.array([e['date'] for e in log])
+n_muts = np.zeros(len(log)) # Mutations between the seed infection and each infection
+for k, entry in enumerate(log): # The log is in time order, so a parent always comes before its children
+    n_muts[k] = (n_muts[parent[k]] if parent[k] is not None else 0) + entry['n_mutations']
+# When each infection ended: the next infection of the same person, else their recovery or death, else the end of the simulation
+end = np.full(len(log), n_days - 1.0)
+for agent, agent_infections in infections.items():
+    for i, (_, k) in enumerate(agent_infections):
+        if i + 1 < len(agent_infections):
+            end[k] = agent_infections[i + 1][0]
+        else:
+            finished = [d for d in (outbreak.people.date_recovered[agent], outbreak.people.date_dead[agent]) if np.isfinite(d)]
+            end[k] = min(finished) if finished else n_days - 1.0
+children = collections.defaultdict(list)
+for k, p in enumerate(parent):
+    if p is not None:
+        children[p].append(k)
+roots = [k for k in range(len(log)) if parent[k] is None]
+
+def to_newick(day, measure):
+    ''' Newick string of the infections up to `day`. Every infected person is a tip.
+    measure='days' or 'mutations' sets what branch lengths mean '''
+    at = lambda k: date[k] if measure == 'days' else n_muts[k]  # Where an infection sits on the x axis
+    tip_at = lambda k: min(end[k], day) if measure == 'days' else n_muts[k] # Where its tip ends (no mutations are drawn after infection)
+    def subtree(k, parent_at):
+        kids = [c for c in children[k] if date[c] <= day]
+        if not kids:
+            return f'tip{k}:{tip_at(k) - parent_at}'
+        parts = [subtree(c, at(k)) for c in kids] + [f'tip{k}:{tip_at(k) - at(k)}'] # The infected person is also a tip
+        return f'({",".join(parts)}):{at(k) - parent_at}'
+    return '(' + ','.join(subtree(r, 0) for r in roots if date[r] <= day) + '):0;' # The seeds and imports join at the root, day 0
+
+# Tips are always drawn in the same order, so that the tree in the GIF grows without shuffling
+tip_order = []
+def collect_tips(k):
+    for c in children[k]:
+        collect_tips(c)
+    tip_order.append(f'tip{k}')
+for r in roots:
+    collect_tips(r)
+tip_y = {name: y for y, name in enumerate(tip_order)}
+tip_variant = {f'tip{k}': e['variant'] for k, e in enumerate(log)}
+
+def branch_colour(branch):
+    variants = {tip_variant[name] for name in branch.leaves} if branch.is_node() else {tip_variant[branch.name]}
+    return palette[variants.pop()] if len(variants) == 1 else '0.5'
+
+def draw_tree(ax, day, measure, point_size):
+    tree = bt.make_tree(to_newick(day, measure), 'divergence')
+    tree.traverse_tree()
+    y_cache = {}
+    def y_of(branch): # Tips keep their place; a node sits halfway between its descendants
+        if id(branch) not in y_cache:
+            y_cache[id(branch)] = tip_y[branch.name] if branch.is_leaf() else np.mean([y_of(c) for c in branch.children])
+        return y_cache[id(branch)]
+    tree.plot_tree(ax, colourFxn=branch_colour, width=0.5, autoSort=False, yCoordinateFxn=y_of)
+    tree.plot_points(ax, targetFxn=lambda k: k.is_leaf(), colourFxn=branch_colour, yCoordinateFxn=y_of, pointSize=point_size, outline=False)
+    ax.set_ylim(-1, len(tip_order))
+    ax.set_yticks([])
+    for side in ('top', 'right', 'left'):
+        ax.spines[side].set_visible(False)
+    return tree
+
+legend_handles = [Line2D([], [], color=palette[v], label=v) for v in ('wild', 'AY.4')] + [Line2D([], [], color='0.5', label='mixed')]
+
+# %% [markdown]
+# **All tips.** The tree of everyone infected during the outbreak. Left, branch lengths are time (the x axis is the simulation day). Right, branch lengths are the number of mutations. Mutations are rare at this clock rate (`mol_clock_rate=1e-6` per site per day), so most branches have none.
+
+# %%
+fig, (ax_days, ax_muts) = plt.subplots(1, 2, figsize=(14, 12))
+for ax, measure, title, xlabel in [(ax_days, 'days', 'Time-scaled', 'Simulation day'), (ax_muts, 'mutations', 'Mutations', 'Mutations from the seed infection')]:
+    newick = to_newick(n_days - 1, measure)
+    with open(f'{plot_dir}/06_transmission_phylogeny_{measure}.nwk', 'w') as f:
+        f.write(newick)
+    tree = draw_tree(ax, n_days - 1, measure, point_size=3)
+    ax.set_title(f'{title} ({len(tree.get_external())} infected agents)')
+    ax.set_xlabel(xlabel)
+plt.tight_layout(rect=(0, 0.03, 1, 1)) # Leave room for the legend under the trees
+fig.legend(handles=legend_handles, loc='lower center', ncol=3, frameon=False)
+plt.savefig(f'{plot_dir}/06_transmission_phylogeny.pdf')
 plt.close()
 
-sample = frames[::5] # The palette is built from a stack of every 5th frame
-stack = Image.new('RGB', (sample[0].width, sample[0].height*len(sample)))
-for i, frame in enumerate(sample):
-    stack.paste(frame, (0, i*frame.height))
-palette = stack.quantize(colors=256, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
-frames = [frame.quantize(palette=palette, dither=Image.Dither.NONE) for frame in frames]
-frames[0].save(f'{plot_dir}/05_clinical_vs_wastewater_over_time.gif', save_all=True, append_images=frames[1:], duration=100, loop=0)
+# %% [markdown]
+# **The outbreak over time.** The tree on each day, with everyone infected so far as a tip, next to the number of infectious agents of each variant. Each frame is one day, from day 1.
+
+# %%
+n_infectious = np.array(outbreak.results['variant']['n_infectious_by_variant'].values) # (variant, day)
+fig, (ax_tree, ax_counts) = plt.subplots(1, 2, figsize=(14, 7), gridspec_kw=dict(width_ratios=[2, 1]))
+for v, name in outbreak['variant_map'].items():
+    ax_counts.plot(np.arange(n_days), n_infectious[v], color=palette[name], label=name)
+ax_counts.set_xlim(0, n_days - 1)
+ax_counts.set_xlabel('Simulation day')
+ax_counts.set_ylabel('Infectious agents')
+ax_counts.legend(frameon=False)
+ax_counts.axvline(ay4_day, color=palette['AY.4'], linestyle=':', linewidth=1.2) # AY.4 arrives
+today = ax_counts.axvline(0, color='0.3', linewidth=1)
+for side in ('top', 'right'):
+    ax_counts.spines[side].set_visible(False)
+
+def update(day):
+    ax_tree.clear()
+    draw_tree(ax_tree, day, 'days', point_size=6)
+    ax_tree.set_xlim(0, n_days - 1) # The same time axis in every frame
+    ax_tree.set_xlabel('Simulation day')
+    ax_tree.set_title(f'Infected so far: {sum(date <= day)}')
+    today.set_xdata([day, day])
+    fig.suptitle(f'Day {day}')
+
+save_gif(fig, lambda i: update(i + 1), n_days - 1, f'{plot_dir}/07_transmission_phylogeny_over_time.gif') # From day 1: on day 0 every branch has length 0
