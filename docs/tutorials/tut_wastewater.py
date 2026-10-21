@@ -547,7 +547,7 @@ save_gif(fig, update, n_days, f'{plot_dir}/05_clinical_vs_wastewater_over_time.g
 # Covasim records who infected whom in `sim.people.infection_log`. With sequence evolution on, each entry also stores the mutations that arose along that transmission (`n_mutations`), so the transmission tree doubles as a phylogeny of the virus. Here we draw it with [baltic](https://github.com/evogytis/baltic), for a small outbreak of 1,000 agents. It starts from 3 wild-type infections, and AY.4 arrives later, on day 30, as 3 imports.
 #
 # * Every infection is a node, joined to the infection of its source that was active on that day. People can be infected more than once, so each reinfection is its own node.
-# * Every infected person is a tip. A tip starts when the person was infected and ends when they recovered or died (or on the day we look at the outbreak, if they are still infected), so its length is how long they were infected. People who infected others have those infections branching off at the day they were infected.
+# * Every infected person is a tip, drawn as a dot on the day they were infected. The people they go on to infect branch off at that same day, so every infection appears whole on the day it happens.
 # * Branches are coloured by variant. Grey branches are ancestors of more than one variant, which is only the root where the separate seed infections join.
 
 # %%
@@ -585,33 +585,25 @@ date = np.array([e['date'] for e in log])
 n_muts = np.zeros(len(log)) # Mutations between the seed infection and each infection
 for k, entry in enumerate(log): # The log is in time order, so a parent always comes before its children
     n_muts[k] = (n_muts[parent[k]] if parent[k] is not None else 0) + entry['n_mutations']
-# When each infection ended: the next infection of the same person, else their recovery or death, else the end of the simulation
-end = np.full(len(log), n_days - 1.0)
-for agent, agent_infections in infections.items():
-    for i, (_, k) in enumerate(agent_infections):
-        if i + 1 < len(agent_infections):
-            end[k] = agent_infections[i + 1][0]
-        else:
-            finished = [d for d in (outbreak.people.date_recovered[agent], outbreak.people.date_dead[agent]) if np.isfinite(d)]
-            end[k] = min(finished) if finished else n_days - 1.0
 children = collections.defaultdict(list)
 for k, p in enumerate(parent):
     if p is not None:
         children[p].append(k)
 roots = [k for k in range(len(log)) if parent[k] is None]
 
+ROOT_LEN = 0.001 # The seeds join at the root with a branch this long, so that no tree ever has branch lengths that are all 0 (baltic would rescale it)
+
 def to_newick(day, measure):
-    ''' Newick string of the infections up to `day`. Every infected person is a tip.
+    ''' Newick string of the infections up to `day`. Every infected person is a tip, on the day they were infected.
     measure='days' or 'mutations' sets what branch lengths mean '''
-    at = lambda k: date[k] if measure == 'days' else n_muts[k]  # Where an infection sits on the x axis
-    tip_at = lambda k: min(end[k], day) if measure == 'days' else n_muts[k] # Where its tip ends (no mutations are drawn after infection)
+    at = lambda k: date[k] if measure == 'days' else n_muts[k] # Where an infection sits on the x axis
     def subtree(k, parent_at):
         kids = [c for c in children[k] if date[c] <= day]
         if not kids:
-            return f'tip{k}:{tip_at(k) - parent_at}'
-        parts = [subtree(c, at(k)) for c in kids] + [f'tip{k}:{tip_at(k) - at(k)}'] # The infected person is also a tip
+            return f'tip{k}:{at(k) - parent_at}'
+        parts = [subtree(c, at(k)) for c in kids] + [f'tip{k}:0'] # The infected person is also a tip, where their lineage splits
         return f'({",".join(parts)}):{at(k) - parent_at}'
-    return '(' + ','.join(subtree(r, 0) for r in roots if date[r] <= day) + '):0;' # The seeds and imports join at the root, day 0
+    return '(' + ','.join(subtree(r, -ROOT_LEN) for r in roots if date[r] <= day) + '):0;' # The seeds and imports join at the root
 
 # Tips are always drawn in the same order, so that the tree in the GIF grows without shuffling
 tip_order = []
@@ -664,7 +656,7 @@ plt.savefig(f'{plot_dir}/06_transmission_phylogeny.pdf')
 plt.close()
 
 # %% [markdown]
-# **The outbreak over time.** The tree on each day, with everyone infected so far as a tip, next to the number of infectious agents of each variant. Each frame is one day, from day 1.
+# **The outbreak over time.** The tree on each day, with everyone infected so far as a tip, next to the number of infectious agents of each variant. Each frame is one day.
 
 # %%
 n_infectious = np.array(outbreak.results['variant']['n_infectious_by_variant'].values) # (variant, day)
@@ -689,4 +681,4 @@ def update(day):
     today.set_xdata([day, day])
     fig.suptitle(f'Day {day}')
 
-save_gif(fig, lambda i: update(i + 1), n_days - 1, f'{plot_dir}/07_transmission_phylogeny_over_time.gif') # From day 1: on day 0 every branch has length 0
+save_gif(fig, update, n_days, f'{plot_dir}/07_transmission_phylogeny_over_time.gif')
