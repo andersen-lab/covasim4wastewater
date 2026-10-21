@@ -13,14 +13,113 @@ from . import data as cvdata
 from . import defaults as cvd
 from . import parameters as cvpar
 from . import people as cvppl
-from .geography import assign_coords
-
+from .geography import assign_density_based_coords, load_density_raster, sample_coords_within_boundaries, assign_regions_from_coords, lonlat_to_km
+from .sewersheds import assign_sewersheds
+import geopandas as gpd
+import pandas as pd
+from shapely.geometry import Point
 
 # Specify all externally visible functions this file defines
-__all__ = ['make_people', 'make_randpop', 'make_random_contacts',
+__all__ = ['make_people', 'make_randpop', 'assign_regions',
+           'assign_density_based_coords', 'make_random_contacts',
            'make_microstructured_contacts', 'make_hybrid_contacts',
            'make_synthpop', 'make_rank_based_contacts']
 
+def load_population_regions(filename):
+    regions = gpd.read_file(filename)
+
+    required = {
+        "region_code",
+        "region_name",
+    }
+
+    missing = required - set(regions.columns)
+
+    if missing:
+        raise ValueError(
+            f"Population boundary file is missing columns: {missing}"
+        )
+
+    if regions.empty:
+        raise ValueError("Population boundary file contains no regions.")
+
+    if regions.crs is not None and not regions.crs.equals("EPSG:4326"): # Agent coordinates are longitude/latitude
+        regions = regions.to_crs("EPSG:4326")
+
+    if "population" in regions.columns:
+        regions["population"] = pd.to_numeric(
+            regions["population"],
+            errors="raise",
+        )
+
+        if (regions["population"] < 0).any():
+            raise ValueError("Population cannot be negative.")
+
+        total_population = regions["population"].sum()
+
+        if total_population <= 0:
+            raise ValueError("Total population must be greater than zero.")
+
+        regions["probability"] = (
+            regions["population"] / total_population
+        )
+    else: # No population data: spread people evenly over the area, i.e. weight each region by its area
+        cvm.warn(
+            'The boundary file has no "population" column, so regions are weighted by their area. '
+            'Add a "population" column to weight by population (it is not needed when pop_type="rank" uses a density_raster).'
+        )
+        geometry = regions.geometry if regions.crs is not None else regions.geometry.set_crs("EPSG:4326")
+        area = geometry.to_crs("EPSG:6933").area # An equal-area projection, so areas are comparable
+        regions["probability"] = area / area.sum()
+
+    return regions
+
+def assign_regions(pars, population_data):
+    pop_size = int(pars["pop_size"])
+
+    labels = population_data["region_code"].to_numpy()
+    probabilities = population_data["probability"].to_numpy()
+
+    return np.random.choice(
+        labels,
+        size=pop_size,
+        p=probabilities,
+    )
+
+def assign_coords(assigned_region_codes, population_data):
+    """
+    Generate coordinates for agents based on their assigned region geometry.
+    
+    assigned_region_codes: array of region_code values assigned to each agent.
+    population_data: GeoDataFrame loaded by load_population_regions.
+    """
+    # Index the population GeoDataFrame by region_code for fast lookup
+    pop_indexed = population_data.set_index("region_code")
+
+    xs = []
+    ys = []
+
+    for r_code in assigned_region_codes:
+        if r_code not in pop_indexed.index:
+            # Fallback if region code isn't found
+            xs.append(0.0)
+            ys.append(0.0)
+            continue
+
+        geom = pop_indexed.loc[r_code, "geometry"]
+        minx, miny, maxx, maxy = geom.bounds
+
+        # Uniform rejection sampling inside the assigned polygon
+        # (Guarantees coordinates fall strictly inside the region shape)
+        while True:
+            rx = np.random.uniform(minx, maxx)
+            ry = np.random.uniform(miny, maxy)
+            if geom.contains(Point(rx, ry)):
+                xs.append(rx)
+                ys.append(ry)
+                break
+
+    return np.column_stack((xs, ys))
 
 def make_people(sim, popdict=None, die=True, reset=False, recreate=False, verbose=None, **kwargs):
     '''
@@ -65,6 +164,7 @@ def make_people(sim, popdict=None, die=True, reset=False, recreate=False, verbos
 
     # If a people object or popdict is supplied, use it
     if sim.people and not reset:
+        sim.sewershed_labels = assign_sewersheds(sim.people, sim.pars)
         sim.people.initialize(sim_pars=sim.pars)
         return sim.people # If it's already there, just return
     elif sim.popdict and popdict is None:
@@ -94,7 +194,10 @@ def make_people(sim, popdict=None, die=True, reset=False, recreate=False, verbos
         people = popdict
         people.set_pars(sim.pars)
     else:
-        people = cvppl.People(sim.pars, uid=popdict['uid'], age=popdict['age'], sex=popdict['sex'], contacts=popdict['contacts'], region=popdict['region']) # List for storing the people
+        spatial = {key: popdict[key] for key in ('x', 'y') if key in popdict.keys()}
+        people = cvppl.People(sim.pars, uid=popdict['uid'], age=popdict['age'], sex=popdict['sex'], contacts=popdict['contacts'], region=popdict['region'], **spatial) # List for storing the people
+
+    sim.sewershed_labels = assign_sewersheds(people, sim.pars)
 
     sc.printv(f'Created {pop_size} people, average age {people.age.mean():0.2f} years', 2, verbose)
 
@@ -203,10 +306,22 @@ def make_randpop(pars, use_age_data=True, use_household_data=True, sex_ratio=0.5
     age_data_prob /= age_data_prob.sum() # Ensure it sums to 1
     age_bins       = cvu.n_multinomial(age_data_prob, pop_size) # Choose age bins
     ages           = age_data_min[age_bins] + age_data_range[age_bins]*np.random.random(pop_size) # Uniformly distribute within this age bin
-    possible_regions = ['1', '2', '3', '4']
-    # Weighted choice: 50% 1, 20% 2, 20% 3, 10% 4
-    probabilities = [0.5, 0.2, 0.2, 0.1]
-    regions = np.random.choice(possible_regions, size=pop_size, p=probabilities)
+    if pars['boundary_shapefile'] is None: # No boundaries supplied: everyone is in a single region, with no coordinates
+        regions = np.ones(pop_size, dtype=cvd.default_int)
+    else:
+        population_data = load_population_regions(pars['boundary_shapefile'])
+        if microstructure == 'rank' and pars['density_raster'] is not None:
+            # Place people according to the population-density raster, but only inside the boundary polygons;
+            # each person's region is the polygon they land in
+            bbox = pars['density_bbox'] if pars['density_bbox'] is not None else tuple(population_data.total_bounds) # Read only the raster window around the boundaries
+            raster = load_density_raster(pars['density_raster'], bbox)
+            coords = sample_coords_within_boundaries(raster, population_data, pop_size)
+            regions = assign_regions_from_coords(coords, population_data)
+        else: # Regions in proportion to the 'population' column, then uniform within each polygon
+            regions = assign_regions(pars, population_data)
+            coords = assign_coords(regions, population_data)
+        pars['people_coords'] = coords
+
     # Store output
     popdict = {}
     popdict['uid'] = uids
@@ -222,8 +337,14 @@ def make_randpop(pars, use_age_data=True, use_household_data=True, sex_ratio=0.5
     elif microstructure == 'hybrid':
         contacts = make_hybrid_contacts(pop_size, ages, pars['contacts'], **kwargs)
     elif microstructure == 'rank':
-        coords = assign_coords(pars)                       # (N,2) x,y in km, sampled from the density raster
-        popdict['x'], popdict['y'] = coords[:, 0], coords[:, 1]
+        if pars['people_coords'] is not None:
+            # Locations came from the boundary file (or the user) as (lon, lat). Use these same locations for the contact
+            # network so that contacts agree with regions and sewersheds. people.x/y keep lon/lat (sewersheds need them);
+            # only the distance calculation uses km.
+            coords = lonlat_to_km(np.asarray(pars['people_coords'], dtype=float))
+        else:
+            coords = assign_density_based_coords(pars)                   # (N,2) x,y in km, sampled from the density raster
+            popdict['x'], popdict['y'] = coords[:, 0], coords[:, 1]
         contacts = dict()
         for lkey,n in pars['contacts'].items():
             contacts[lkey] = make_rank_based_contacts(coords, n, **kwargs)

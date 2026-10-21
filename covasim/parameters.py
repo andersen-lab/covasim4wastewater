@@ -35,7 +35,10 @@ def make_pars(set_prognoses=False, prog_by_age=True, version=None, **kwargs):
     pars['pop_infected'] = 20       # Number of initial infections
     pars['pop_type']     = 'random' # What type of population data to use -- 'random' (fastest), 'synthpops' (best), 'hybrid' (compromise), 'rank' (population-density based modeling)
     pars['location']     = None     # What location to load data from -- default Seattle
-
+    pars['boundary_shapefile'] = None # Optional path to a boundary file (GeoJSON/shapefile with region_code, region_name, population) used to assign regions and coordinates; None means a single region with no coordinates
+    pars['sewershed_file'] = None # Optional path to a sewershed polygon file (GeoJSON/shapefile with a 'sid' property); None means one whole-population catchment (requires boundary_shapefile or people_coords)
+    pars['people_coords'] = None   # Optional array of shape (pop_size, 2) with x,y coordinates for each person; if None, assign randomly within the boundary shapefile
+      
     # Simulation parameters
     pars['start_day']  = '2020-03-01' # Start day of the simulation
     pars['end_day']    = None         # End day of the simulation
@@ -55,7 +58,7 @@ def make_pars(set_prognoses=False, prog_by_age=True, version=None, **kwargs):
     pars['contacts']        = None  # The number of contacts per layer; set by reset_layer_pars() below
     pars['dynam_layer']     = None  # Which layers are dynamic; set by reset_layer_pars() below
     pars['beta_layer']      = None  # Transmissibility per layer; set by reset_layer_pars() below
-    pars['density_raster'] = None # Path to a population-density GeoTIFF (people per pixel), used to place agents when pop_type='rank'; None uses a 10x10 km test square
+    pars['density_raster'] = None # Path to a population-density GeoTIFF (people per pixel), used to place agents when pop_type='rank' (inside boundary_shapefile, if given); None uses a 10x10 km test square
     pars['density_bbox']   = None # Optional (lon_min, lat_min, lon_max, lat_max) window of that raster to read; None reads the whole file
     
     # Basic disease transmission parameters
