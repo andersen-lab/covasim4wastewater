@@ -130,7 +130,8 @@ def make_pars(set_prognoses=False, prog_by_age=True, version=None, **kwargs):
         fitness_model     = 'bloom_nt',              # Fitness model; 'bloom_nt' → BloomNtFitnessModel
         fitness_data_path = 'data/nt_fitness.csv',   # Path to Bloom lab nt_fitness.csv
         fitness_scale     = 0.1,                     # Scales log-fitness sum before exp(); tune to calibrate sweep speed
-        bottleneck        = False,                   # If True, a less-fit mutated sequence is transmitted with probability fitness_target/fitness_source, otherwise the source's sequence is transmitted unchanged; requires a fitness model
+        bottleneck        = False,                   # If True, a less-fit mutated sequence is rejected with probability rejection_prob and the source's sequence is transmitted unchanged; requires a fitness model
+        rejection_prob    = 1.0,                     # Probability that the bottleneck rejects a less-fit mutated sequence; 0 never rejects, 1 rejects every one
     )
 
     # Handle vaccine and variant parameters

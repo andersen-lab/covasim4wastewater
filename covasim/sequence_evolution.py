@@ -278,6 +278,7 @@ class LineageSequenceTracker:
         self.L    = evo_pars.get('L', 1000)
         self.rate = evo_pars.get('mol_clock_rate', 1e-5)
         self.bottleneck = evo_pars.get('bottleneck', False)  # Probabilistic transmission bottleneck; see annotate_entry()
+        self.rejection_prob = evo_pars.get('rejection_prob', 1.0)  # Probability of rejecting a less-fit mutant
 
         ref = evo_pars.get('reference')
         if ref is None:
@@ -337,8 +338,9 @@ class LineageSequenceTracker:
 
         Bottleneck (evo_pars['bottleneck'] = True): if the mutated sequence is at
         least as fit as the source's, it is transmitted. If it is less fit, it is
-        transmitted with probability fitness_target/fitness_source; otherwise the
-        source's sequence is transmitted unchanged (no new mutations).
+        rejected with probability evo_pars['rejection_prob'] — the source's sequence
+        is then transmitted unchanged (no new mutations). The rejection probability
+        is the same for every deleterious mutation, however small the fitness loss.
 
         Call this after infection_log.append(entry) and before
         date_exposed[target] is written for the current infection.
@@ -377,13 +379,14 @@ class LineageSequenceTracker:
         mutations, child_seq = self.model.evolve_branch(self.rng, parent_seq, delta_t, self.rate)
         child_muts = _apply_branch_mutations(parent_muts, mutations, self.reference) if _track else None
 
-        # Bottleneck: a less-fit mutated sequence passes with probability fitness_target/fitness_source,
-        # otherwise the source's sequence is transmitted. Seeds and imports (no source) are not affected.
+        # Bottleneck: a less-fit mutated sequence is rejected with probability rejection_prob,
+        # and the source's sequence is transmitted instead. Seeds and imports (no source) are
+        # not affected.
         rejected = []
         if self.bottleneck and self.fitness_model is not None and source is not None and mutations:
             fit_source = self.fitness_model.compute_fitness(parent_muts)
             fit_target = self.fitness_model.compute_fitness(child_muts)
-            if fit_target < fit_source and self.rng.random() >= fit_target / fit_source:
+            if fit_target < fit_source and self.rng.random() < self.rejection_prob:
                 rejected   = mutations
                 mutations  = []
                 child_seq  = parent_seq.copy()

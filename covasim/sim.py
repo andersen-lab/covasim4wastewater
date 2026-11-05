@@ -526,6 +526,8 @@ class Sim(cvb.BaseSim):
                 raise ValueError(f'Unknown fitness model "{model_key}"; choices: bloom_nt, None')
             if ep.get('bottleneck', False) and tracker.fitness_model is None:
                 raise ValueError('evo_pars["bottleneck"] = True requires a fitness model; set fitness_model="bloom_nt"')
+            if not 0 <= tracker.rejection_prob <= 1:
+                raise ValueError(f'evo_pars["rejection_prob"] must be between 0 and 1, not {tracker.rejection_prob}')
 
             # Extract founding mutations for variants that supply a founding_fasta
             for v in self['variants']:
