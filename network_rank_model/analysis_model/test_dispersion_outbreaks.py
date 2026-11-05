@@ -67,7 +67,7 @@ print(f'Sewershed file: {SEWERSHEDS.name}')
 # ---------------------------------------------------------------------------
 # Settings (the same as the earlier plots)
 # ---------------------------------------------------------------------------
-N         = 100000     # agents
+N         = 20000     # agents
 N_DAYS    = 120        # length of the epidemic
 SEED      = 1          # first seed (replicate r uses SEED + r)
 N_RUNS    = 3          # replicates per setting
