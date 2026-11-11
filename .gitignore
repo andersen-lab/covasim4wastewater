@@ -156,3 +156,8 @@ reads/
 *.mldist
 *.fasta
 *.png
+*.pdf
+*.nexus
+
+/docs/tutorials/eleanor/treetime_out/*
+/docs/tutorials/eleanor/treetime_dates.csv
