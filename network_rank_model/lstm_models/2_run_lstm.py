@@ -5,8 +5,7 @@ Needs the Covasim runs made by 8a_make_covasim_runs.py. This script needs torch 
 Python environment from 8a.
 
 PURPOSE
-  Test whether a neural network (an LSTM) can recover the TRUE daily infections of an epidemic from the two things a health
-  department actually observes: reported cases and wastewater concentrations. Covasim simulates the epidemics, so the true
+  Test whether a neural network (an LSTM) can recover the TRUE daily infections of an epidemic from the two things actually observed: reported cases and wastewater concentrations. Covasim simulates the epidemics, so the true
   infections are known exactly and the estimate can be scored.
   The data are CLEAN: the reported cases are exactly what Covasim reports, and the wastewater has no unknown scale, little lab noise and a
   sample every day. The question is whether the LSTM can learn from Covasim at all, and how much each stream contributes.
